@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ghost Browser Settings",
+  "type": "object",
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "general": {
+      "type": "object",
+      "properties": {
+        "startupBehavior": {
+          "type": "string",
+          "enum": ["newTab", "lastSession", "specificPages"]
+        },
+        "homePage": { "type": "string" },
+        "searchEngine": {
+          "type": "string",
+          "enum": ["duckduckgo", "google", "bing", "brave", "startpage"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "appearance": {
+      "type": "object",
+      "properties": {
+        "theme": { "type": "string", "enum": ["dark", "light", "system"] },
+        "showBookmarksBar": { "type": "boolean" },
+        "fontSize": { "type": "integer", "minimum": 8, "maximum": 36 },
+        "zoomLevel": { "type": "integer", "minimum": 25, "maximum": 500 }
+      },
+      "additionalProperties": false
+    },
+    "content": {
+      "type": "object",
+      "properties": {
+        "autoplay": { "type": "boolean" },
+        "fullScreenVideo": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "privacy": {
+      "type": "object",
+      "properties": {
+        "doNotTrack": { "type": "boolean" },
+        "blockThirdPartyCookies": { "type": "boolean" },
+        "clearDataOnExit": { "type": "boolean" },
+        "httpsOnly": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "downloads": {
+      "type": "object",
+      "properties": {
+        "askWhereToSave": { "type": "boolean" },
+        "defaultPath": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "languages": {
+      "type": "object",
+      "properties": {
+        "spellCheck": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "system": {
+      "type": "object",
+      "properties": {
+        "hardwareAcceleration": { "type": "boolean" },
+        "backgroundApps": { "type": "boolean" },
+        "proxyMode": { "type": "string", "enum": ["system", "none", "manual"] }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": ["version"],
+  "additionalProperties": false
+}

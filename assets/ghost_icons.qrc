@@ -1,0 +1,40 @@
+<RCC>
+    <qresource prefix="/icons/dark">
+        <file alias="arrow-left.svg">icons/dark/arrow-left.svg</file>
+        <file alias="arrow-right.svg">icons/dark/arrow-right.svg</file>
+        <file alias="refresh-cw.svg">icons/dark/refresh-cw.svg</file>
+        <file alias="home.svg">icons/dark/home.svg</file>
+        <file alias="plus.svg">icons/dark/plus.svg</file>
+        <file alias="x.svg">icons/dark/x.svg</file>
+        <file alias="menu.svg">icons/dark/menu.svg</file>
+        <file alias="lock.svg">icons/dark/lock.svg</file>
+        <file alias="unlock.svg">icons/dark/unlock.svg</file>
+        <file alias="search.svg">icons/dark/search.svg</file>
+        <file alias="minimize.svg">icons/dark/minimize.svg</file>
+        <file alias="maximize.svg">icons/dark/maximize.svg</file>
+        <file alias="restore.svg">icons/dark/restore.svg</file>
+    </qresource>
+    <qresource prefix="/icons/light">
+        <file alias="arrow-left.svg">icons/light/arrow-left.svg</file>
+        <file alias="arrow-right.svg">icons/light/arrow-right.svg</file>
+        <file alias="refresh-cw.svg">icons/light/refresh-cw.svg</file>
+        <file alias="home.svg">icons/light/home.svg</file>
+        <file alias="plus.svg">icons/light/plus.svg</file>
+        <file alias="x.svg">icons/light/x.svg</file>
+        <file alias="menu.svg">icons/light/menu.svg</file>
+        <file alias="lock.svg">icons/light/lock.svg</file>
+        <file alias="unlock.svg">icons/light/unlock.svg</file>
+        <file alias="search.svg">icons/light/search.svg</file>
+        <file alias="minimize.svg">icons/light/minimize.svg</file>
+        <file alias="maximize.svg">icons/light/maximize.svg</file>
+        <file alias="restore.svg">icons/light/restore.svg</file>
+    </qresource>
+    <qresource prefix="/pages">
+        <file alias="newtab.html">pages/newtab.html</file>
+        <file alias="codec-test.html">pages/codec-test.html</file>
+        <file alias="settings.html">pages/settings.html</file>
+    </qresource>
+    <qresource prefix="/js">
+        <file alias="settings-bridge.js">js/settings-bridge.js</file>
+    </qresource>
+</RCC>

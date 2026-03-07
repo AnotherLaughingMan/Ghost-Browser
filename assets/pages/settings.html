@@ -1,0 +1,1178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ghost — Settings</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, sans-serif;
+    background: #1E1E2E;
+    color: #E0E0E0;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Top navigation bar (Settings / History / Bookmarks / Downloads) ── */
+  .top-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    background: #1E1E2E;
+    border-bottom: 1px solid #2A2A3C;
+    padding: 0 24px;
+    min-height: 48px;
+    flex-shrink: 0;
+  }
+  .top-bar a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 18px;
+    color: #888;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+  }
+  .top-bar a:hover { color: #CCC; }
+  .top-bar a.active {
+    color: #7C7FE8;
+    border-bottom-color: #7C7FE8;
+  }
+  .top-bar .top-icon {
+    width: 16px; height: 16px;
+    stroke: currentColor; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .top-bar .spacer { flex: 1; }
+  .top-bar .search-icon {
+    padding: 8px;
+    cursor: pointer;
+    color: #888;
+  }
+  .top-bar .search-icon:hover { color: #CCC; }
+
+  /* ── Main layout ── */
+  .main { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 220px;
+    min-width: 220px;
+    background: #1E1E2E;
+    border-right: 1px solid #2A2A3C;
+    display: flex;
+    flex-direction: column;
+    padding: 8px 0;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  .sidebar a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 20px;
+    color: #C0C0C0;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 400;
+    transition: background 0.12s, color 0.12s;
+    cursor: pointer;
+  }
+  .sidebar a:hover {
+    background: rgba(255,255,255,0.06);
+    color: #FFF;
+  }
+  .sidebar a.active {
+    background: rgba(91,95,199,0.15);
+    color: #7C7FE8;
+  }
+  .sidebar .sep {
+    height: 1px;
+    background: #2A2A3C;
+    margin: 8px 16px;
+  }
+  .sidebar .sidebar-icon {
+    width: 18px; height: 18px;
+    stroke: currentColor; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    flex-shrink: 0;
+  }
+  .sidebar .about {
+    margin-top: auto;
+    padding: 16px 20px;
+    border-top: 1px solid #2A2A3C;
+  }
+  .sidebar .about .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #7C7FE8;
+  }
+  .sidebar .about .version {
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
+    padding-left: 26px;
+  }
+
+  /* ── Content panel ── */
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 40px;
+  }
+  .content h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #E0E0E0;
+    margin-bottom: 24px;
+  }
+  .section {
+    margin-bottom: 32px;
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #AAA;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .setting-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    background: #262638;
+    border-radius: 8px;
+    margin-bottom: 2px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .setting-row:first-child { border-radius: 8px 8px 0 0; }
+  .setting-row:last-child { border-radius: 0 0 8px 8px; margin-bottom: 0; }
+  .setting-row:only-child { border-radius: 8px; }
+  .setting-row:hover { background: #2E2E42; }
+
+  .setting-row .label {
+    font-size: 14px;
+    color: #E0E0E0;
+  }
+  .setting-row .sublabel {
+    font-size: 12px;
+    color: #888;
+    margin-top: 2px;
+  }
+  .setting-row .chevron {
+    width: 16px; height: 16px;
+    stroke: #666; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .setting-row .value {
+    font-size: 13px;
+    color: #7C7FE8;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    position: relative;
+    width: 40px; height: 22px;
+    background: #444;
+    border-radius: 11px;
+    cursor: pointer;
+    transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .toggle.on { background: #5B5FC7; }
+  .toggle::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    background: #FFF;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle.on::after { transform: translateX(18px); }
+
+  /* Radio group */
+  .radio-group { display: flex; flex-direction: column; gap: 2px; }
+  .radio-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: #262638;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .radio-row:first-child { border-radius: 8px 8px 0 0; }
+  .radio-row:last-child { border-radius: 0 0 8px 8px; }
+  .radio-row:hover { background: #2E2E42; }
+  .radio-dot {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 2px solid #555;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .radio-dot.selected { border-color: #5B5FC7; }
+  .radio-dot.selected::after {
+    content: '';
+    width: 10px; height: 10px;
+    background: #5B5FC7;
+    border-radius: 50%;
+  }
+  .radio-label { font-size: 14px; color: #E0E0E0; }
+
+  /* Select / dropdown */
+  .setting-select {
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    min-width: 140px;
+  }
+  .setting-select:focus { outline: none; border-color: #5B5FC7; }
+  .action-btn {
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .action-btn:hover {
+    background: #333346;
+    border-color: #5B5FC7;
+  }
+  .action-btn.danger:hover {
+    border-color: #E81123;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #3A3A4A; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
+
+  /* Hidden panel */
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  body.light-theme {
+    background: #F3F5F9;
+    color: #1F2430;
+  }
+  body.light-theme .top-bar,
+  body.light-theme .sidebar,
+  body.light-theme #dummy,
+  body.light-theme .content,
+  body.light-theme .main {
+    background: #F3F5F9;
+  }
+  body.light-theme .top-bar,
+  body.light-theme .sidebar {
+    border-color: #D9DFEA;
+  }
+  body.light-theme .top-bar a,
+  body.light-theme .search-icon,
+  body.light-theme .sidebar a,
+  body.light-theme .sidebar .version,
+  body.light-theme .section-title,
+  body.light-theme .sublabel,
+  body.light-theme .chevron {
+    color: #5E6573;
+    stroke: #5E6573;
+  }
+  body.light-theme .top-bar a.active,
+  body.light-theme .sidebar a.active,
+  body.light-theme .sidebar .about .brand,
+  body.light-theme .value {
+    color: #5B5FC7;
+  }
+  body.light-theme .top-bar a:hover,
+  body.light-theme .search-icon:hover,
+  body.light-theme .sidebar a:hover {
+    color: #1F2430;
+  }
+  body.light-theme .setting-row,
+  body.light-theme .radio-row,
+  body.light-theme .setting-select,
+  body.light-theme .action-btn {
+    background: #FFFFFF;
+    color: #1F2430;
+    border-color: #D9DFEA;
+  }
+  body.light-theme .setting-row:hover,
+  body.light-theme .radio-row:hover {
+    background: #E8ECF5;
+  }
+  body.light-theme .label,
+  body.light-theme .radio-label,
+  body.light-theme h2 {
+    color: #1F2430;
+  }
+  body.light-theme .toggle {
+    background: #C8CEDA;
+  }
+  body.light-theme ::-webkit-scrollbar-thumb {
+    background: #C8CEDA;
+  }
+
+  /* ── History view ── */
+  .history-view {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .history-view.active { display: flex; }
+  .history-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 40px;
+    border-bottom: 1px solid #2A2A3C;
+    flex-shrink: 0;
+  }
+  .history-toolbar h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #E0E0E0;
+    margin: 0;
+    flex: 1;
+  }
+  .history-search {
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    width: 220px;
+  }
+  .history-search:focus { outline: none; border-color: #5B5FC7; }
+  .history-search::placeholder { color: #666; }
+  .history-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 40px 32px;
+  }
+  .history-group-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 20px 0 8px;
+    border-bottom: 1px solid #2A2A3C;
+    margin-bottom: 4px;
+  }
+  .history-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .history-entry:hover { background: #2E2E42; }
+  .history-entry .h-time {
+    font-size: 12px;
+    color: #666;
+    min-width: 52px;
+    flex-shrink: 0;
+  }
+  .history-entry .h-favicon {
+    width: 16px; height: 16px;
+    flex-shrink: 0;
+    border-radius: 2px;
+    background: #3A3A4A;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; color: #888;
+  }
+  .history-entry .h-title {
+    font-size: 14px;
+    color: #E0E0E0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 1;
+  }
+  .history-entry .h-url {
+    font-size: 12px;
+    color: #5B5FC7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 300px;
+  }
+  .history-entry .h-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: opacity 0.12s, color 0.12s;
+  }
+  .history-entry:hover .h-delete { opacity: 1; }
+  .history-entry .h-delete:hover { color: #E81123; }
+  .history-empty {
+    text-align: center;
+    color: #666;
+    padding: 60px 0;
+    font-size: 14px;
+  }
+
+  /* Light theme overrides for history */
+  body.light-theme .history-toolbar { border-color: #D9DFEA; }
+  body.light-theme .history-toolbar h2 { color: #1F2430; }
+  body.light-theme .history-search { background: #FFF; color: #1F2430; border-color: #D9DFEA; }
+  body.light-theme .history-search::placeholder { color: #999; }
+  body.light-theme .history-group-header { color: #5E6573; border-color: #D9DFEA; }
+  body.light-theme .history-entry:hover { background: #E8ECF5; }
+  body.light-theme .history-entry .h-time { color: #999; }
+  body.light-theme .history-entry .h-title { color: #1F2430; }
+  body.light-theme .history-entry .h-favicon { background: #E8ECF5; color: #999; }
+
+  /* ── Cookie view (mirrors history layout) ── */
+  .cookie-view {
+    display: none;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .cookie-view.active { display: flex; }
+  .cookie-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 40px;
+    border-bottom: 1px solid #2A2A3C;
+    flex-shrink: 0;
+  }
+  .cookie-toolbar h2 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #E0E0E0;
+    margin: 0;
+    flex: 1;
+  }
+  .cookie-search {
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    width: 220px;
+  }
+  .cookie-search:focus { outline: none; border-color: #5B5FC7; }
+  .cookie-search::placeholder { color: #666; }
+  .cookie-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 40px 32px;
+  }
+  .cookie-group-header {
+    font-size: 13px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 20px 0 8px;
+    border-bottom: 1px solid #2A2A3C;
+    margin-bottom: 4px;
+  }
+  .cookie-entry {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    transition: background 0.12s;
+  }
+  .cookie-entry:hover { background: #2E2E42; }
+  .cookie-entry .c-name {
+    font-size: 14px;
+    color: #E0E0E0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 120px;
+    max-width: 200px;
+    flex-shrink: 0;
+  }
+  .cookie-entry .c-domain {
+    font-size: 12px;
+    color: #5B5FC7;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 140px;
+    max-width: 240px;
+    flex-shrink: 0;
+  }
+  .cookie-entry .c-flags {
+    font-size: 11px;
+    color: #666;
+    display: flex;
+    gap: 6px;
+    flex: 1;
+  }
+  .cookie-entry .c-flags span {
+    background: #2A2A3C;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .cookie-entry .c-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    transition: opacity 0.12s, color 0.12s;
+  }
+  .cookie-entry:hover .c-delete { opacity: 1; }
+  .cookie-entry .c-delete:hover { color: #E81123; }
+  .cookie-empty {
+    text-align: center;
+    color: #666;
+    padding: 60px 0;
+    font-size: 14px;
+  }
+
+  /* Light theme overrides for cookies */
+  body.light-theme .cookie-toolbar { border-color: #D9DFEA; }
+  body.light-theme .cookie-toolbar h2 { color: #1F2430; }
+  body.light-theme .cookie-search { background: #FFF; color: #1F2430; border-color: #D9DFEA; }
+  body.light-theme .cookie-search::placeholder { color: #999; }
+  body.light-theme .cookie-group-header { color: #5E6573; border-color: #D9DFEA; }
+  body.light-theme .cookie-entry:hover { background: #E8ECF5; }
+  body.light-theme .cookie-entry .c-name { color: #1F2430; }
+  body.light-theme .cookie-entry .c-flags span { background: #E8ECF5; }
+</style>
+</head>
+<body>
+
+<!-- ── Top navigation bar ── -->
+<div class="top-bar">
+  <a href="#" class="active" data-topnav="settings">
+    <svg class="top-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    Settings
+  </a>
+  <a href="#" data-topnav="history">
+    <svg class="top-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    History
+  </a>
+  <a href="#" data-topnav="cookies">
+    <svg class="top-icon" viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"/><circle cx="5.5" cy="10.5" r="1"/><circle cx="8.5" cy="14.5" r="1"/><circle cx="12" cy="11" r="1"/></svg>
+    Cookies
+  </a>
+  <a href="#" data-topnav="bookmarks">
+    <svg class="top-icon" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+    Bookmarks
+  </a>
+  <a href="#" data-topnav="downloads">
+    <svg class="top-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    Downloads
+  </a>
+  <span class="spacer"></span>
+  <span class="search-icon">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+  </span>
+</div>
+
+<!-- ── Main layout ── -->
+<div class="main">
+
+  <!-- ── Settings view (sidebar + panels) ── -->
+  <div class="settings-view" id="settingsView" style="display:flex;flex:1;overflow:hidden;">
+
+  <!-- ── Sidebar ── -->
+  <nav class="sidebar">
+    <a href="#" class="active" data-section="get-started">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      Get started
+    </a>
+    <a href="#" data-section="appearance">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+      Appearance
+    </a>
+    <a href="#" data-section="content">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Content
+    </a>
+    <a href="#" data-section="protection">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      Protection
+    </a>
+    <a href="#" data-section="privacy">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      Privacy and security
+    </a>
+    <a href="#" data-section="search-engine">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      Search engine
+    </a>
+    <a href="#" data-section="extensions">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Extensions
+    </a>
+    <div class="sep"></div>
+    <a href="#" data-section="autofill">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+      Autofill and passwords
+    </a>
+    <a href="#" data-section="languages">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      Languages
+    </a>
+    <a href="#" data-section="downloads-settings">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      Downloads
+    </a>
+    <a href="#" data-section="accessibility">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+      Accessibility
+    </a>
+    <a href="#" data-section="system">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+      System
+    </a>
+    <a href="#" data-section="reset">
+      <svg class="sidebar-icon" viewBox="0 0 24 24"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+      Reset settings
+    </a>
+    <div class="about">
+      <div class="brand">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
+        About Ghost
+      </div>
+      <div class="version">v 0.1.1</div>
+    </div>
+  </nav>
+
+  <!-- ── Content panels ── -->
+  <div class="content">
+
+    <!-- GET STARTED -->
+    <div class="panel active" id="get-started">
+      <h2>Get started</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Profile name and icon</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Import bookmarks and settings</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px;">
+          <div>
+            <div class="label">Ghost is your default browser</div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">On startup</div>
+        <div class="radio-group">
+          <div class="radio-row" data-setting-path="general.startupBehavior" data-setting-value="newTab">
+            <div class="radio-dot selected"></div>
+            <span class="radio-label">Open the New Tab page</span>
+          </div>
+          <div class="radio-row" data-setting-path="general.startupBehavior" data-setting-value="lastSession">
+            <div class="radio-dot"></div>
+            <span class="radio-label">Continue where you left off</span>
+          </div>
+          <div class="radio-row" data-setting-path="general.startupBehavior" data-setting-value="specificPages">
+            <div class="radio-dot"></div>
+            <span class="radio-label">Open a specific page or set of pages</span>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">New Tab Page</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div class="label">New tab page shows</div>
+          <select class="setting-select" data-setting-path="general.homePage">
+            <option value="ghost://newtab" selected>Dashboard</option>
+            <option value="about:blank">Blank page</option>
+            <option value="ghost://newtab">Homepage</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div class="label">Customize new tab page</div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- APPEARANCE -->
+    <div class="panel" id="appearance">
+      <h2>Appearance</h2>
+      <div class="section">
+        <div class="section-title">Theme</div>
+        <div class="radio-group">
+          <div class="radio-row" data-setting-path="appearance.theme" data-setting-value="dark">
+            <div class="radio-dot selected"></div>
+            <span class="radio-label">Dark</span>
+          </div>
+          <div class="radio-row" data-setting-path="appearance.theme" data-setting-value="light">
+            <div class="radio-dot"></div>
+            <span class="radio-label">Light</span>
+          </div>
+          <div class="radio-row" data-setting-path="appearance.theme" data-setting-value="system">
+            <div class="radio-dot"></div>
+            <span class="radio-label">Same as system</span>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Show bookmarks bar</div>
+            <div class="sublabel">Display the bookmarks bar below the address bar</div>
+          </div>
+          <div class="toggle" data-setting-path="appearance.showBookmarksBar"></div>
+        </div>
+        <div class="setting-row">
+          <div class="label">Font size</div>
+          <select class="setting-select" data-setting-path="appearance.fontSize">
+            <option value="12">Very small</option>
+            <option value="14">Small</option>
+            <option value="16" selected>Medium</option>
+            <option value="18">Large</option>
+            <option value="20">Very large</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div class="label">Page zoom</div>
+          <select class="setting-select" data-setting-path="appearance.zoomLevel">
+            <option value="75">75%</option>
+            <option value="90">90%</option>
+            <option value="100" selected>100%</option>
+            <option value="110">110%</option>
+            <option value="125">125%</option>
+            <option value="150">150%</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- CONTENT -->
+    <div class="panel" id="content">
+      <h2>Content</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Autoplay</div>
+            <div class="sublabel">Allow media sites to start playback without extra user gesture delays</div>
+          </div>
+          <div class="toggle on" data-setting-path="content.autoplay"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Allow full-screen video</div>
+            <div class="sublabel">Enable full-screen playback support for video sites</div>
+          </div>
+          <div class="toggle on" data-setting-path="content.fullScreenVideo"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Site settings</div>
+            <div class="sublabel">Permissions and per-site controls are the next content phase</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROTECTION -->
+    <div class="panel" id="protection">
+      <h2>Protection</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Trackers &amp; ads blocking</div>
+            <div class="sublabel">Block cross-site trackers and intrusive ads</div>
+          </div>
+          <select class="setting-select" data-setting-path="protection.trackingLevel">
+            <option value="standard">Standard</option>
+            <option value="aggressive" selected>Aggressive</option>
+            <option value="disabled">Disabled</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Upgrade connections to HTTPS</div>
+            <div class="sublabel">Use secure connections whenever available</div>
+          </div>
+          <div class="toggle on" data-setting-path="protection.httpsUpgrade"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Block fingerprinting</div>
+            <div class="sublabel">Prevent sites from identifying your device</div>
+          </div>
+          <div class="toggle on" data-setting-path="protection.blockFingerprinting"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Block scripts</div>
+            <div class="sublabel">Block third-party scripts from loading</div>
+          </div>
+          <div class="toggle" data-setting-path="protection.blockScripts"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PRIVACY AND SECURITY -->
+    <div class="panel" id="privacy">
+      <h2>Privacy and security</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Send "Do Not Track" request</div>
+            <div class="sublabel">Tell sites you don't want to be tracked</div>
+          </div>
+          <div class="toggle on" data-setting-path="privacy.doNotTrack"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Block third-party cookies</div>
+            <div class="sublabel">Prevent cross-site cookie tracking</div>
+          </div>
+          <div class="toggle on" data-setting-path="privacy.blockThirdPartyCookies"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Clear browsing data on exit</div>
+            <div class="sublabel">Automatically clear history, cookies, and cache when you close Ghost</div>
+          </div>
+          <div class="toggle" data-setting-path="privacy.clearDataOnExit"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Clear browsing data</div>
+            <div class="sublabel">Clear history, cookies, cache, and other browsing data</div>
+          </div>
+          <button class="action-btn" data-action="clearBrowsingData">Clear</button>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Security</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Safe Browsing</div>
+            <div class="sublabel">Protect against dangerous sites and downloads</div>
+          </div>
+          <div class="toggle on" data-setting-path="protection.safeBrowsing"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">HTTPS-Only Mode</div>
+            <div class="sublabel">Always use secure connections</div>
+          </div>
+          <div class="toggle" data-setting-path="privacy.httpsOnly"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SEARCH ENGINE -->
+    <div class="panel" id="search-engine">
+      <h2>Search engine</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div class="label">Search engine used in the address bar</div>
+          <select class="setting-select" data-setting-path="general.searchEngine">
+            <option value="duckduckgo" selected>DuckDuckGo</option>
+            <option value="google">Google</option>
+            <option value="bing">Bing</option>
+            <option value="brave">Brave Search</option>
+            <option value="startpage">Startpage</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Manage search engines</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXTENSIONS -->
+    <div class="panel" id="extensions">
+      <h2>Extensions</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px;">
+          <div>
+            <div class="label">Manage extensions</div>
+            <div class="sublabel">View and configure installed browser extensions</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- AUTOFILL AND PASSWORDS -->
+    <div class="panel" id="autofill">
+      <h2>Autofill and passwords</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Password Manager</div>
+            <div class="sublabel">Manage saved passwords</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Payment methods</div>
+            <div class="sublabel">Manage saved payment methods</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Addresses and more</div>
+            <div class="sublabel">Manage saved addresses for faster form filling</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- LANGUAGES -->
+    <div class="panel" id="languages">
+      <h2>Languages</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Display language</div>
+            <div class="sublabel">Ghost is displayed in this language</div>
+          </div>
+          <span class="value">English (United States)</span>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Spell check</div>
+            <div class="sublabel">Check spelling in text fields</div>
+          </div>
+          <div class="toggle on" data-setting-path="languages.spellCheck"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DOWNLOADS -->
+    <div class="panel" id="downloads-settings">
+      <h2>Downloads</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Location</div>
+            <div class="sublabel">Default download folder</div>
+          </div>
+          <button class="action-btn" data-action="chooseDownloadPath">Choose</button>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Current folder</div>
+            <div class="sublabel" id="downloadPathValue">Downloads</div>
+          </div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Ask where to save each file before downloading</div>
+          </div>
+          <div class="toggle" data-setting-path="downloads.askWhereToSave"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ACCESSIBILITY -->
+    <div class="panel" id="accessibility">
+      <h2>Accessibility</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Show a caret in pages</div>
+            <div class="sublabel">Navigate pages with a text cursor</div>
+          </div>
+          <div class="toggle" data-setting-path="accessibility.caretBrowsing"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Force high contrast</div>
+            <div class="sublabel">Improve readability on all sites</div>
+          </div>
+          <div class="toggle" data-setting-path="accessibility.highContrast"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SYSTEM -->
+    <div class="panel" id="system">
+      <h2>System</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Use hardware acceleration when available</div>
+            <div class="sublabel">Uses GPU for better performance</div>
+          </div>
+          <div class="toggle on" data-setting-path="system.hardwareAcceleration"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Continue running background apps when Ghost is closed</div>
+          </div>
+          <div class="toggle" data-setting-path="system.backgroundApps"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Proxy settings</div>
+            <div class="sublabel">Configure network proxy</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- RESET SETTINGS -->
+    <div class="panel" id="reset">
+      <h2>Reset settings</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px;">
+          <div>
+            <div class="label">Restore settings to their original defaults</div>
+            <div class="sublabel">This will reset your startup page, new tab page, search engine, and pinned tabs. It will also disable all extensions and clear temporary data like cookies. Your bookmarks, history, and saved passwords will not be affected.</div>
+          </div>
+          <button class="action-btn danger" data-action="resetSettings">Reset</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end .content -->
+
+  </div><!-- end .settings-view -->
+
+  <!-- ── History view ── -->
+  <div class="history-view" id="historyView">
+    <div class="history-toolbar">
+      <h2>History</h2>
+      <input type="text" class="history-search" id="historySearch" placeholder="Search history...">
+      <select class="setting-select" id="historyClearRange">
+        <option value="" disabled selected>Clear history...</option>
+        <option value="1hour">Last hour</option>
+        <option value="24hours">Last 24 hours</option>
+        <option value="7days">Last 7 days</option>
+        <option value="4weeks">Last 4 weeks</option>
+        <option value="forever">All time</option>
+      </select>
+    </div>
+    <div class="history-list" id="historyList">
+      <div class="history-empty">No browsing history yet.</div>
+    </div>
+  </div>
+
+  <!-- ── Cookie view ── -->
+  <div class="cookie-view" id="cookieView">
+    <div class="cookie-toolbar">
+      <h2>Cookies</h2>
+      <input type="text" class="cookie-search" id="cookieSearch" placeholder="Search by site...">
+      <select class="setting-select" id="cookieClearRange">
+        <option value="" disabled selected>Clear cookies...</option>
+        <option value="1hour">Last hour</option>
+        <option value="24hours">Last 24 hours</option>
+        <option value="7days">Last 7 days</option>
+        <option value="4weeks">Last 4 weeks</option>
+        <option value="forever">All cookies</option>
+      </select>
+    </div>
+    <div class="cookie-list" id="cookieList">
+      <div class="cookie-empty">No cookies stored.</div>
+    </div>
+  </div>
+
+</div><!-- end .main -->
+<script>
+(function() {
+  // ── Sidebar navigation ──
+  const sidebar = document.querySelector('.sidebar');
+  const panels = document.querySelectorAll('.panel');
+
+  sidebar.addEventListener('click', function(e) {
+    const link = e.target.closest('a[data-section]');
+    if (!link) return;
+    e.preventDefault();
+
+    sidebar.querySelectorAll('a').forEach(a => a.classList.remove('active'));
+    link.classList.add('active');
+
+    const sectionId = link.dataset.section;
+    panels.forEach(p => p.classList.toggle('active', p.id === sectionId));
+  });
+
+  // ── Top bar navigation (settings vs history vs cookies view switching) ──
+  const topBar = document.querySelector('.top-bar');
+  const settingsView = document.getElementById('settingsView');
+  const historyView = document.getElementById('historyView');
+  const cookieView = document.getElementById('cookieView');
+
+  topBar.addEventListener('click', function(e) {
+    const link = e.target.closest('a[data-topnav]');
+    if (!link) return;
+    e.preventDefault();
+
+    topBar.querySelectorAll('a').forEach(a => a.classList.remove('active'));
+    link.classList.add('active');
+
+    const nav = link.dataset.topnav;
+    settingsView.style.display = (nav === 'settings') ? 'flex' : 'none';
+    historyView.classList.toggle('active', nav === 'history');
+    cookieView.classList.toggle('active', nav === 'cookies');
+
+    if (nav === 'history' && window.GhostSettingsBridge.refreshHistory) {
+      window.GhostSettingsBridge.refreshHistory();
+    }
+    if (nav === 'cookies' && window.GhostSettingsBridge.refreshCookies) {
+      window.GhostSettingsBridge.refreshCookies();
+    }
+  });
+
+})();
+</script>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="qrc:///js/settings-bridge.js"></script>
+<script>
+window.GhostSettingsBridge.initializeSettingsPage();
+</script>
+</body>
+</html>

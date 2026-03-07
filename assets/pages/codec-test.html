@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ghost — Codec Support Test</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #1E1E2E;
+    color: #CDD6F4;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    padding: 32px;
+  }
+  h1 { color: #CBA6F7; margin-bottom: 8px; font-size: 24px; }
+  .subtitle { color: #6C7086; margin-bottom: 24px; font-size: 13px; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 32px;
+  }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: #313244;
+    color: #BAC2DE;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #313244;
+    font-size: 14px;
+  }
+  .yes { color: #A6E3A1; font-weight: 600; }
+  .no  { color: #F38BA8; font-weight: 600; }
+  .maybe { color: #F9E2AF; font-weight: 600; }
+  h2 {
+    color: #89B4FA;
+    font-size: 16px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #313244;
+  }
+  .section { margin-bottom: 28px; }
+  .summary {
+    background: #313244;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    gap: 32px;
+  }
+  .stat { text-align: center; }
+  .stat-num { font-size: 28px; font-weight: 700; }
+  .stat-label { font-size: 11px; color: #6C7086; text-transform: uppercase; }
+</style>
+</head>
+<body>
+<h1>Codec Support Test</h1>
+<p class="subtitle">Testing media codec availability in this QtWebEngine build</p>
+
+<div class="summary" id="summary">
+  <div class="stat">
+    <div class="stat-num yes" id="pass-count">—</div>
+    <div class="stat-label">Supported</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num no" id="fail-count">—</div>
+    <div class="stat-label">Unsupported</div>
+  </div>
+  <div class="stat">
+    <div class="stat-num maybe" id="maybe-count">—</div>
+    <div class="stat-label">Possibly</div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Video Codecs</h2>
+  <table><thead><tr><th>Codec</th><th>MIME Type</th><th>Status</th></tr></thead>
+  <tbody id="video-codecs"></tbody></table>
+</div>
+
+<div class="section">
+  <h2>Audio Codecs</h2>
+  <table><thead><tr><th>Codec</th><th>MIME Type</th><th>Status</th></tr></thead>
+  <tbody id="audio-codecs"></tbody></table>
+</div>
+
+<div class="section">
+  <h2>Container Formats</h2>
+  <table><thead><tr><th>Format</th><th>MIME Type</th><th>Status</th></tr></thead>
+  <tbody id="container-formats"></tbody></table>
+</div>
+
+<script>
+const videoCodecs = [
+  { name: 'H.264 / AVC (Baseline)',    mime: 'video/mp4; codecs="avc1.42E01E"' },
+  { name: 'H.264 / AVC (Main)',        mime: 'video/mp4; codecs="avc1.4D401F"' },
+  { name: 'H.264 / AVC (High)',        mime: 'video/mp4; codecs="avc1.640028"' },
+  { name: 'H.265 / HEVC (Main)',       mime: 'video/mp4; codecs="hvc1.1.6.L93.B0"' },
+  { name: 'H.265 / HEVC (Main 10)',    mime: 'video/mp4; codecs="hev1.2.4.L120.B0"' },
+  { name: 'VP8',                       mime: 'video/webm; codecs="vp8"' },
+  { name: 'VP9',                       mime: 'video/webm; codecs="vp9"' },
+  { name: 'VP9 Profile 2 (10-bit)',    mime: 'video/webm; codecs="vp09.02.10.10"' },
+  { name: 'AV1',                       mime: 'video/mp4; codecs="av01.0.08M.08"' },
+  { name: 'AV1 (WebM)',                mime: 'video/webm; codecs="av01.0.04M.08"' },
+  { name: 'Theora',                    mime: 'video/ogg; codecs="theora"' },
+  { name: 'MPEG-4 Visual (Part 2)',    mime: 'video/mp4; codecs="mp4v.20.9"' },
+];
+
+const audioCodecs = [
+  { name: 'AAC-LC',                    mime: 'audio/mp4; codecs="mp4a.40.2"' },
+  { name: 'HE-AAC (AAC+)',            mime: 'audio/mp4; codecs="mp4a.40.5"' },
+  { name: 'HE-AAC v2 (eAAC+)',        mime: 'audio/mp4; codecs="mp4a.40.29"' },
+  { name: 'xHE-AAC (USAC)',           mime: 'audio/mp4; codecs="mp4a.40.42"' },
+  { name: 'Opus (WebM)',               mime: 'audio/webm; codecs="opus"' },
+  { name: 'Opus (OGG)',               mime: 'audio/ogg; codecs="opus"' },
+  { name: 'Opus (MP4)',               mime: 'audio/mp4; codecs="opus"' },
+  { name: 'Vorbis',                    mime: 'audio/ogg; codecs="vorbis"' },
+  { name: 'FLAC',                      mime: 'audio/flac' },
+  { name: 'FLAC (OGG)',               mime: 'audio/ogg; codecs="flac"' },
+  { name: 'FLAC (MP4)',               mime: 'audio/mp4; codecs="flac"' },
+  { name: 'ALAC (Apple Lossless)',     mime: 'audio/mp4; codecs="alac"' },
+  { name: 'MP3',                       mime: 'audio/mpeg' },
+  { name: 'MP3 (MP4 container)',       mime: 'audio/mp4; codecs="mp3"' },
+  { name: 'PCM (WAV)',                mime: 'audio/wav; codecs="1"' },
+  { name: 'AC-3 (Dolby Digital)',      mime: 'audio/mp4; codecs="ac-3"' },
+  { name: 'E-AC-3 (Dolby Digital+)',   mime: 'audio/mp4; codecs="ec-3"' },
+  { name: 'DTS',                       mime: 'audio/mp4; codecs="dts"' },
+  { name: 'DTS-HD',                    mime: 'audio/mp4; codecs="dtsh"' },
+  { name: 'Dolby TrueHD',             mime: 'audio/mp4; codecs="mlpa"' },
+  { name: 'AMR-NB',                    mime: 'audio/amr' },
+  { name: 'AMR-WB',                    mime: 'audio/amr-wb' },
+];
+
+const containerFormats = [
+  { name: 'MP4',                       mime: 'video/mp4' },
+  { name: 'WebM',                      mime: 'video/webm' },
+  { name: 'Ogg',                       mime: 'video/ogg' },
+  { name: 'MKV (Matroska)',           mime: 'video/x-matroska' },
+  { name: 'AVI',                       mime: 'video/x-msvideo' },
+  { name: 'MPEG-TS',                  mime: 'video/mp2t' },
+  { name: 'MP3 container',            mime: 'audio/mpeg' },
+  { name: 'M4A (AAC)',                mime: 'audio/mp4' },
+  { name: 'OGG audio',                mime: 'audio/ogg' },
+  { name: 'WebM audio',               mime: 'audio/webm' },
+  { name: 'WAV',                       mime: 'audio/wav' },
+  { name: 'FLAC container',           mime: 'audio/flac' },
+];
+
+function checkSupport(mime) {
+  const v = document.createElement('video');
+  const result = v.canPlayType(mime);
+  if (result === 'probably') return { text: 'Yes (probably)', cls: 'yes' };
+  if (result === 'maybe')    return { text: 'Maybe', cls: 'maybe' };
+  return { text: 'No', cls: 'no' };
+}
+
+function populateTable(tbodyId, items) {
+  const tbody = document.getElementById(tbodyId);
+  for (const item of items) {
+    const { text, cls } = checkSupport(item.mime);
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + item.name + '</td>' +
+      '<td><code style="color:#89B4FA;font-size:12px">' + item.mime + '</code></td>' +
+      '<td class="' + cls + '">' + text + '</td>';
+    tbody.appendChild(tr);
+  }
+}
+
+populateTable('video-codecs', videoCodecs);
+populateTable('audio-codecs', audioCodecs);
+populateTable('container-formats', containerFormats);
+
+// Tally results
+const allItems = [...videoCodecs, ...audioCodecs, ...containerFormats];
+let pass = 0, fail = 0, maybe = 0;
+for (const item of allItems) {
+  const v = document.createElement('video');
+  const r = v.canPlayType(item.mime);
+  if (r === 'probably') pass++;
+  else if (r === 'maybe') maybe++;
+  else fail++;
+}
+document.getElementById('pass-count').textContent = pass;
+document.getElementById('fail-count').textContent = fail;
+document.getElementById('maybe-count').textContent = maybe;
+</script>
+</body>
+</html>

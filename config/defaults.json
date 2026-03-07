@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "general": {
+    "startupBehavior": "newTab",
+    "homePage": "ghost://newtab",
+    "searchEngine": "duckduckgo"
+  },
+  "appearance": {
+    "theme": "dark",
+    "showBookmarksBar": false,
+    "fontSize": 16,
+    "zoomLevel": 100
+  },
+  "content": {
+    "autoplay": true,
+    "fullScreenVideo": true
+  },
+  "privacy": {
+    "doNotTrack": true,
+    "blockThirdPartyCookies": true,
+    "clearDataOnExit": false,
+    "httpsOnly": false
+  },
+  "downloads": {
+    "askWhereToSave": false,
+    "defaultPath": ""
+  },
+  "languages": {
+    "spellCheck": true
+  },
+  "system": {
+    "hardwareAcceleration": true,
+    "backgroundApps": false,
+    "proxyMode": "system"
+  },
+  "protection": {
+    "trackingLevel": "aggressive",
+    "httpsUpgrade": true,
+    "blockFingerprinting": true,
+    "blockScripts": false,
+    "safeBrowsing": true
+  },
+  "accessibility": {
+    "caretBrowsing": false,
+    "highContrast": false
+  }
+}

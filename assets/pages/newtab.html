@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Tab</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%; width: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    background: #1E1E2E;
+    color: #CCCCCC;
+    overflow: hidden;
+    user-select: none;
+  }
+  .container {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: flex-start; padding-top: 14vh; height: 100%;
+  }
+  .clock {
+    font-size: 5.5rem; font-weight: 300; letter-spacing: -2px;
+    color: #E0E0E0; margin-bottom: 2rem;
+  }
+  .search-wrapper {
+    width: min(540px, 85vw); position: relative; margin-bottom: 3rem;
+  }
+  .search-input {
+    width: 100%; padding: 12px 18px 12px 44px;
+    border: 1px solid #3A3A4A; border-radius: 24px;
+    background: #2A2A3C; color: #E0E0E0;
+    font-size: 0.95rem; outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .search-input::placeholder { color: #888; }
+  .search-input:focus {
+    border-color: #5B5FC7; box-shadow: 0 0 0 2px rgba(91, 95, 199, 0.25);
+  }
+  .search-icon {
+    position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+    width: 18px; height: 18px; stroke: #888; fill: none;
+  }
+  .shortcuts {
+    display: grid; grid-template-columns: repeat(auto-fit, 88px);
+    gap: 16px; justify-content: center; width: min(600px, 90vw);
+  }
+  .shortcut {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 6px; text-decoration: none; color: #AAA;
+    padding: 12px 4px; border-radius: 10px;
+    transition: background 0.15s;
+  }
+  .shortcut:hover { background: rgba(255,255,255,0.06); }
+  .shortcut-icon {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: #2A2A3C; display: flex; align-items: center;
+    justify-content: center; font-size: 1.3rem; color: #CCC;
+    border: 1px solid #3A3A4A;
+  }
+  .shortcut-label {
+    font-size: 0.72rem; max-width: 80px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: center;
+  }
+  .branding {
+    position: absolute; bottom: 24px;
+    font-size: 0.7rem; color: #555; letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="clock" id="clock"></div>
+  <div class="search-wrapper">
+    <svg class="search-icon" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+    <input class="search-input" type="text" placeholder="Search the web..." id="searchInput" autocomplete="off"/>
+  </div>
+  <div class="shortcuts" id="shortcuts"></div>
+  <div class="branding">GHOST</div>
+</div>
+<script>
+(function() {
+  'use strict';
+  const clockEl = document.getElementById('clock');
+  function tick() {
+    const now = new Date();
+    let h = now.getHours(), m = now.getMinutes();
+    clockEl.textContent = h + ':' + (m < 10 ? '0' : '') + m;
+  }
+  tick();
+  setInterval(tick, 10000);
+
+  const input = document.getElementById('searchInput');
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+      const q = input.value.trim();
+      if (!q) return;
+      if (q.includes('.') && !q.includes(' ')) {
+        window.location.href = q.includes('://') ? q : 'https://' + q;
+      } else {
+        window.location.href = 'https://duckduckgo.com/?q=' + encodeURIComponent(q);
+      }
+    }
+  });
+})();
+</script>
+</body>
+</html>

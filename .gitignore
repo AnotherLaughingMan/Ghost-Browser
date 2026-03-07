@@ -1,0 +1,63 @@
+# ── Build output ──────────────────────────────────────────────
+build/
+out/
+bin/
+x64/
+x86/
+
+# ── Qt / CMake generated ──────────────────────────────────────
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+.qt/
+
+# ── MSVC object files & intermediates ────────────────────────
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.dll
+*.exe
+
+# ── Python virtual environment ────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ── Node / npm (if added later) ───────────────────────────────
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# ── TypeScript output (compiled JS lives in assets/js/) ───────
+# assets/js/ is intentionally committed — it is the built artifact
+# embedded via Qt resources. Do NOT add assets/js here.
+
+# ── Logs & temp ───────────────────────────────────────────────
+*.log
+*.tmp
+*.bak
+*.orig
+
+# ── OS artifacts ──────────────────────────────────────────────
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ── VS Code / Copilot local settings ─────────────────────────
+.vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
+copilot-instructions.md
+
+# ── Qt installer / aqtinstall ─────────────────────────────────
+aqtinstall.log
