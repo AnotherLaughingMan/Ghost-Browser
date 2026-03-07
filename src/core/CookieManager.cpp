@@ -14,12 +14,21 @@ CookieManager::CookieManager(QWebEngineCookieStore *store, QObject *parent)
     if (!m_store)
         return;
 
+    m_store->setCookieFilter([this](const QWebEngineCookieStore::FilterRequest &request) {
+        return !m_blockThirdPartyCookies.load() || !request.thirdParty;
+    });
+
     connect(m_store, &QWebEngineCookieStore::cookieAdded,
             this, &CookieManager::onCookieAdded);
     connect(m_store, &QWebEngineCookieStore::cookieRemoved,
             this, &CookieManager::onCookieRemoved);
 
     reload();
+}
+
+void CookieManager::setBlockThirdPartyCookies(bool enabled)
+{
+    m_blockThirdPartyCookies.store(enabled);
 }
 
 QString CookieManager::getCookiesJson() const
@@ -105,18 +114,25 @@ void CookieManager::reload()
     m_cookies.clear();
     m_store->loadAllCookies();
 
-    // loadAllCookies() delivers cookies via async IPC from the browser process.
-    // A QueuedConnection lambda fires in the next event tick — before the IPC
-    // signals arrive — so cookiesChanged would fire with an empty list.
-    // 300 ms gives the browser process time to flush all cookieAdded signals.
-    QTimer::singleShot(300, this, [this]() {
-        m_loading = false;
-        emit cookiesChanged();
+    // Existing cookies can arrive from the browser process after startup with
+    // variable latency. Retry a couple of times before declaring the list empty.
+    QTimer::singleShot(350, this, [this]() {
+        finishReload(2);
     });
 }
 
 void CookieManager::onCookieAdded(const QNetworkCookie &cookie)
 {
+    for (int i = 0; i < m_cookies.size(); ++i) {
+        const QNetworkCookie &existing = m_cookies.at(i);
+        if (existing.name() == cookie.name()
+            && existing.domain() == cookie.domain()
+            && existing.path() == cookie.path()) {
+            m_cookies.removeAt(i);
+            break;
+        }
+    }
+
     m_cookies.append(cookie);
     if (!m_loading)
         emit cookiesChanged();
@@ -133,5 +149,22 @@ void CookieManager::onCookieRemoved(const QNetworkCookie &cookie)
             break;
         }
     }
+    emit cookiesChanged();
+}
+
+void CookieManager::finishReload(int remainingRetries)
+{
+    if (!m_store)
+        return;
+
+    if (m_cookies.isEmpty() && remainingRetries > 0) {
+        m_store->loadAllCookies();
+        QTimer::singleShot(350, this, [this, remainingRetries]() {
+            finishReload(remainingRetries - 1);
+        });
+        return;
+    }
+
+    m_loading = false;
     emit cookiesChanged();
 }

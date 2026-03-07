@@ -19,6 +19,19 @@ interface GhostSettings {
     fontSize: number;
     zoomLevel: number;
   };
+  content: {
+    autoplay: boolean;
+    fullScreenVideo: boolean;
+    youtubeShortsAsNormalVideos: boolean;
+    siteSettings: {
+      javascript: 'allow' | 'block';
+      popups: 'allow' | 'block';
+      notifications: 'ask' | 'allow' | 'block';
+      location: 'ask' | 'allow' | 'block';
+      camera: 'ask' | 'allow' | 'block';
+      microphone: 'ask' | 'allow' | 'block';
+    };
+  };
   privacy: {
     doNotTrack: boolean;
     blockThirdPartyCookies: boolean;
@@ -123,6 +136,19 @@ function defaultSettings(): GhostSettings {
       showBookmarksBar: false,
       fontSize: 16,
       zoomLevel: 100,
+    },
+    content: {
+      autoplay: true,
+      fullScreenVideo: true,
+      youtubeShortsAsNormalVideos: true,
+      siteSettings: {
+        javascript: 'allow',
+        popups: 'block',
+        notifications: 'ask',
+        location: 'ask',
+        camera: 'ask',
+        microphone: 'ask',
+      },
     },
     privacy: {
       doNotTrack: true,
@@ -233,11 +259,45 @@ function applyState(settings: GhostSettings): void {
     downloadPathLabel.textContent = settings.downloads.defaultPath || 'Downloads';
   }
 
+  const notificationsDefaultSummary = document.getElementById('notificationsDefaultSummary');
+  if (notificationsDefaultSummary) {
+    notificationsDefaultSummary.textContent = formatPermissionSummary(
+      settings.content.siteSettings.notifications,
+      'notifications'
+    );
+  }
+
+  const cameraMicrophoneDefaultSummary = document.getElementById('cameraMicrophoneDefaultSummary');
+  if (cameraMicrophoneDefaultSummary) {
+    cameraMicrophoneDefaultSummary.textContent = `Camera: ${formatPermissionSummary(settings.content.siteSettings.camera, 'camera')} Microphone: ${formatPermissionSummary(settings.content.siteSettings.microphone, 'microphone')}`;
+  }
+
   applyTheme(settings.appearance.theme);
 }
 
+function formatPermissionSummary(
+  value: 'ask' | 'allow' | 'block',
+  target: 'notifications' | 'camera' | 'microphone'
+): string {
+  switch (target) {
+    case 'notifications':
+      if (value === 'allow') return 'Sites can send notifications automatically.';
+      if (value === 'block') return 'Sites are blocked from sending notifications.';
+      return 'Ask before sites can send notifications.';
+    case 'camera':
+      if (value === 'allow') return 'Allow automatically.';
+      if (value === 'block') return 'Blocked automatically.';
+      return 'Ask before access.';
+    case 'microphone':
+      if (value === 'allow') return 'Allow automatically.';
+      if (value === 'block') return 'Blocked automatically.';
+      return 'Ask before access.';
+  }
+}
+
 function applyTheme(theme: GhostTheme): void {
-  const useLight = theme === 'light';
+  const useLight = theme === 'light'
+    || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
   document.body.classList.toggle('light-theme', useLight);
 }
 

@@ -1,4 +1,7 @@
 <RCC>
+    <qresource prefix="/app">
+        <file alias="ghost-small.ico">Ghost_Small.ico</file>
+    </qresource>
     <qresource prefix="/icons/dark">
         <file alias="arrow-left.svg">icons/dark/arrow-left.svg</file>
         <file alias="arrow-right.svg">icons/dark/arrow-right.svg</file>
@@ -13,6 +16,8 @@
         <file alias="minimize.svg">icons/dark/minimize.svg</file>
         <file alias="maximize.svg">icons/dark/maximize.svg</file>
         <file alias="restore.svg">icons/dark/restore.svg</file>
+        <file alias="volume-2.svg">icons/dark/volume-2.svg</file>
+        <file alias="volume-x.svg">icons/dark/volume-x.svg</file>
     </qresource>
     <qresource prefix="/icons/light">
         <file alias="arrow-left.svg">icons/light/arrow-left.svg</file>
@@ -28,6 +33,8 @@
         <file alias="minimize.svg">icons/light/minimize.svg</file>
         <file alias="maximize.svg">icons/light/maximize.svg</file>
         <file alias="restore.svg">icons/light/restore.svg</file>
+        <file alias="volume-2.svg">icons/light/volume-2.svg</file>
+        <file alias="volume-x.svg">icons/light/volume-x.svg</file>
     </qresource>
     <qresource prefix="/pages">
         <file alias="newtab.html">pages/newtab.html</file>

@@ -122,6 +122,15 @@ QJsonObject SettingsManager::builtInDefaults() const
         { QStringLiteral("content"), QJsonObject {
             { QStringLiteral("autoplay"), true },
             { QStringLiteral("fullScreenVideo"), true },
+            { QStringLiteral("youtubeShortsAsNormalVideos"), true },
+            { QStringLiteral("siteSettings"), QJsonObject {
+                { QStringLiteral("javascript"), QStringLiteral("allow") },
+                { QStringLiteral("popups"), QStringLiteral("block") },
+                { QStringLiteral("notifications"), QStringLiteral("ask") },
+                { QStringLiteral("location"), QStringLiteral("ask") },
+                { QStringLiteral("camera"), QStringLiteral("ask") },
+                { QStringLiteral("microphone"), QStringLiteral("ask") },
+            } },
         } },
         { QStringLiteral("privacy"), QJsonObject {
             { QStringLiteral("doNotTrack"), true },

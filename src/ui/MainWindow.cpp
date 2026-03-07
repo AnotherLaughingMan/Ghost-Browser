@@ -7,12 +7,20 @@
 
 #include <QAction>
 #include <QCloseEvent>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QEvent>
+#include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
 #include <QIcon>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMouseEvent>
@@ -21,7 +29,10 @@
 #include <QStandardPaths>
 #include <QStackedWidget>
 #include <QTabBar>
+#include <QTimer>
 #include <QToolButton>
+#include <QStringList>
+#include <QStyleHints>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -90,7 +101,13 @@ MainWindow::MainWindow(QWidget *parent)
         applyPrivacySettings();
         applyDownloadSettings();
         applySystemSettings();
+        saveSessionState();
     });
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            this, [this](Qt::ColorScheme) {
+                if (m_settings->value(QStringLiteral("appearance.theme")).toString() == QLatin1String("system"))
+                    applyAppearanceSettings();
+            });
     connect(m_settings, &SettingsManager::clearBrowsingDataRequested,
             this, [this]() {
                 if (!m_profile)
@@ -110,7 +127,21 @@ MainWindow::MainWindow(QWidget *parent)
     applySystemSettings();
     applyStyles();
 
-    addTab(startupPageUrl());
+    auto *tabStateTimer = new QTimer(this);
+    tabStateTimer->setInterval(750);
+    connect(tabStateTimer, &QTimer::timeout, this, [this]() {
+        if (!m_pageStack)
+            return;
+
+        for (int i = 0; i < m_pageStack->count(); ++i) {
+            if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i)))
+                refreshTabPresentation(view);
+        }
+    });
+    tabStateTimer->start();
+
+    if (!restoreSessionState())
+        addTab(startupPageUrl());
 }
 
 MainWindow::~MainWindow() = default;
@@ -121,7 +152,7 @@ void MainWindow::buildTitleBar()
 {
     m_titleBar = new QWidget(this);
     m_titleBar->setObjectName("titleBar");
-    m_titleBar->setFixedHeight(38);
+    m_titleBar->setFixedHeight(42);
 
     auto *layout = new QHBoxLayout(m_titleBar);
     layout->setContentsMargins(8, 0, 0, 0);
@@ -136,9 +167,14 @@ void MainWindow::buildTitleBar()
     m_tabBar->setDrawBase(false);
     m_tabBar->setElideMode(Qt::ElideRight);
     m_tabBar->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+    m_tabBar->setIconSize(QSize(16, 16));
+    m_tabBar->setUsesScrollButtons(true);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &MainWindow::switchTab);
     connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
+    connect(m_tabBar, &QTabBar::tabMoved, this, [this](int, int) {
+        saveSessionState();
+    });
 
     // New-tab (+) button — sits immediately after the last tab
     m_newTabBtn = new QToolButton(m_titleBar);
@@ -146,7 +182,7 @@ void MainWindow::buildTitleBar()
     m_newTabBtn->setIconSize(QSize(14, 14));
     m_newTabBtn->setToolTip("New Tab");
     m_newTabBtn->setObjectName("newTabBtn");
-    m_newTabBtn->setFixedSize(28, 28);
+    m_newTabBtn->setFixedSize(30, 30);
     connect(m_newTabBtn, &QToolButton::clicked, this, &MainWindow::addNewTab);
 
     // Drag spacer — captures mouse for window dragging
@@ -166,7 +202,7 @@ void MainWindow::buildTitleBar()
         btn->setIconSize(QSize(14, 14));
         btn->setToolTip(tip);
         btn->setObjectName(objName);
-        btn->setFixedSize(46, 38);
+        btn->setFixedSize(46, 42);
         return btn;
     };
 
@@ -284,7 +320,9 @@ void MainWindow::addTab(const QUrl &url, const QString &label)
     auto *view = createWebView(url);
     m_pageStack->addWidget(view);
     const int idx = m_tabBar->addTab(label);
+    refreshTabPresentation(view);
     m_tabBar->setCurrentIndex(idx);
+    saveSessionState();
 
     if (url.scheme() == QLatin1String("qrc"))
         m_urlBar->clear();
@@ -312,16 +350,19 @@ void MainWindow::applyStyles()
             background: transparent;
         }
         #tabBar::tab {
-            background: %2;
+            background: %1;
             color: %3;
             border: none;
-            padding: 6px 16px;
+            padding: 8px 18px;
             margin-right: 1px;
-            min-width: 140px;
-            max-width: 240px;
+            min-height: 32px;
+            min-width: 196px;
+            max-width: 320px;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
         }
         #tabBar::tab:selected {
-            background: %1;
+            background: %2;
             color: %4;
             border-bottom: 2px solid %5;
         }
@@ -337,6 +378,15 @@ void MainWindow::applyStyles()
             background: transparent;
             border: none;
             border-radius: 4px;
+        }
+        #tabAudioButton {
+            background: transparent;
+            border: none;
+            border-radius: 3px;
+            padding: 0px;
+        }
+        #tabAudioButton:hover {
+            background: rgba(91,95,199,0.16);
         }
         #menuBtn::menu-indicator {
             image: none;
@@ -417,7 +467,13 @@ void MainWindow::applyStyles()
 void MainWindow::applyAppearanceSettings()
 {
     const QString theme = m_settings->value(QStringLiteral("appearance.theme")).toString();
-    m_darkMode = (theme != QLatin1String("light"));
+    if (theme == QLatin1String("light")) {
+        m_darkMode = false;
+    } else if (theme == QLatin1String("system")) {
+        m_darkMode = QGuiApplication::styleHints()->colorScheme() != Qt::ColorScheme::Light;
+    } else {
+        m_darkMode = true;
+    }
 
     if (m_bookmarksBar)
         m_bookmarksBar->setVisible(m_settings->value(QStringLiteral("appearance.showBookmarksBar")).toBool());
@@ -426,16 +482,20 @@ void MainWindow::applyAppearanceSettings()
     applyStyles();
 
     for (int i = 0; i < m_pageStack->count(); ++i) {
-        if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i)))
+        if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
             applyViewSettings(view);
+            refreshTabPresentation(view);
+        }
     }
 }
 
 void MainWindow::applyContentSettings()
 {
     for (int i = 0; i < m_pageStack->count(); ++i) {
-        if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i)))
+        if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
             applyViewSettings(view);
+            applyPerViewContentRules(view);
+        }
     }
 }
 
@@ -445,9 +505,13 @@ void MainWindow::applyPrivacySettings()
         return;
 
     const bool clearOnExit = m_settings->value(QStringLiteral("privacy.clearDataOnExit")).toBool();
+    const bool blockThirdPartyCookies = m_settings->value(QStringLiteral("privacy.blockThirdPartyCookies")).toBool();
     m_profile->setPersistentCookiesPolicy(clearOnExit
         ? QWebEngineProfile::NoPersistentCookies
         : QWebEngineProfile::AllowPersistentCookies);
+
+    if (m_cookies)
+        m_cookies->setBlockThirdPartyCookies(blockThirdPartyCookies);
 }
 
 void MainWindow::applyDownloadSettings()
@@ -495,6 +559,8 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     const int zoomLevel = m_settings->value(QStringLiteral("appearance.zoomLevel")).toInt();
     const bool autoplayEnabled = m_settings->value(QStringLiteral("content.autoplay")).toBool();
     const bool fullScreenEnabled = m_settings->value(QStringLiteral("content.fullScreenVideo")).toBool();
+    const bool javascriptEnabled = siteSettingValue(QStringLiteral("content.siteSettings.javascript"), QStringLiteral("allow")) != QLatin1String("block");
+    const bool popupsEnabled = siteSettingValue(QStringLiteral("content.siteSettings.popups"), QStringLiteral("block")) == QLatin1String("allow");
     const QColor backgroundColor = m_darkMode ? QColor(0x1E, 0x1E, 0x2E) : QColor(0xF3, 0xF5, 0xF9);
 
     view->settings()->setFontSize(QWebEngineSettings::DefaultFontSize, fontSize > 0 ? fontSize : 16);
@@ -503,12 +569,23 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     view->settings()->setAttribute(QWebEngineSettings::DnsPrefetchEnabled, true);
     view->settings()->setAttribute(QWebEngineSettings::ScrollAnimatorEnabled, true);
     view->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
-    view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, javascriptEnabled);
+    view->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, popupsEnabled);
     const bool hwAccel = m_settings->value(QStringLiteral("system.hardwareAcceleration")).toBool();
     view->settings()->setAttribute(QWebEngineSettings::WebGLEnabled, hwAccel);
     view->settings()->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled, hwAccel);
     view->setZoomFactor((zoomLevel > 0 ? zoomLevel : 100) / 100.0);
     view->page()->setBackgroundColor(backgroundColor);
+}
+
+void MainWindow::applyPerViewContentRules(QWebEngineView *view)
+{
+    if (!view)
+        return;
+
+    const QUrl normalized = normalizedYouTubeUrl(view->url());
+    if (normalized != view->url())
+        view->setUrl(normalized);
 }
 
 void MainWindow::refreshIcons()
@@ -564,6 +641,7 @@ void MainWindow::closeTab(int index)
     m_tabBar->removeTab(index);
     m_pageStack->removeWidget(widget);
     widget->deleteLater();
+    saveSessionState();
 }
 
 void MainWindow::switchTab(int index)
@@ -579,6 +657,8 @@ void MainWindow::switchTab(int index)
         else
             m_urlBar->setText(url.toString());
     }
+
+    saveSessionState();
 }
 
 // ── Navigation ────────────────────────────────────────────────
@@ -690,11 +770,8 @@ void MainWindow::updateTabTitle(const QString &title)
     if (!view)
         return;
 
-    int idx = m_pageStack->indexOf(view);
-    if (idx >= 0) {
-        QString label = title.isEmpty() ? QStringLiteral("New Tab") : title.left(30);
-        m_tabBar->setTabText(idx, label);
-    }
+    Q_UNUSED(title);
+    refreshTabPresentation(view);
 }
 
 // ── Window controls ──────────────────────────────────────────
@@ -794,6 +871,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    saveSessionState();
     clearBrowsingDataIfNeeded();
     QMainWindow::closeEvent(event);
 }
@@ -880,16 +958,124 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
     if (isSettingsUrl(url))
         attachSettingsBridge(view);
 
-    view->setUrl(url);
+    view->setUrl(normalizedYouTubeUrl(url));
 
-    connect(view, &QWebEngineView::urlChanged,   this, &MainWindow::updateUrlBar);
+    connect(view, &QWebEngineView::urlChanged, this, [this, view](const QUrl &url) {
+        const QUrl normalized = normalizedYouTubeUrl(url);
+        if (normalized != url) {
+            view->setUrl(normalized);
+            return;
+        }
+
+        refreshTabPresentation(view);
+        updateUrlBar(url);
+        saveSessionState();
+    });
     connect(view, &QWebEngineView::titleChanged,  this, &MainWindow::updateTabTitle);
+    connect(page, &QWebEnginePage::featurePermissionRequested,
+            this, [this, page](const QUrl &origin, QWebEnginePage::Feature feature) {
+                applyFeaturePermission(page, origin, feature);
+            });
+    connect(page, &QWebEnginePage::iconChanged, this, [this, view](const QIcon &) {
+        refreshTabPresentation(view);
+    });
+    connect(page, &QWebEnginePage::recentlyAudibleChanged, this, [this, view](bool) {
+        refreshTabPresentation(view);
+    });
+    connect(page, &QWebEnginePage::audioMutedChanged, this, [this, view](bool) {
+        refreshTabPresentation(view);
+    });
     connect(view, &QWebEngineView::loadFinished, this, [this, view](bool ok) {
-        if (ok && view)
+        if (ok && view) {
+            refreshTabPresentation(view);
             m_history->recordVisit(view->url(), view->title());
+        }
     });
 
     return view;
+}
+
+void MainWindow::refreshTabPresentation(QWebEngineView *view)
+{
+    if (!view || !m_tabBar)
+        return;
+
+    const int idx = tabIndexForView(view);
+    if (idx < 0)
+        return;
+
+    QWebEnginePage *page = view->page();
+    QString label = view->title().trimmed();
+    if (label.isEmpty())
+        label = QStringLiteral("New Tab");
+
+    QWidget *iconsWidget = m_tabBar->tabButton(idx, QTabBar::LeftSide);
+    QLabel *faviconLabel = nullptr;
+    QToolButton *audioButton = nullptr;
+
+    if (!iconsWidget) {
+        iconsWidget = new QWidget(m_tabBar);
+        auto *iconsLayout = new QHBoxLayout(iconsWidget);
+        iconsLayout->setContentsMargins(0, 0, 0, 0);
+        iconsLayout->setSpacing(4);
+        iconsWidget->setFixedSize(36, 16);
+
+        faviconLabel = new QLabel(iconsWidget);
+        faviconLabel->setObjectName(QStringLiteral("tabFaviconLabel"));
+        faviconLabel->setFixedSize(16, 16);
+
+        audioButton = new QToolButton(iconsWidget);
+        audioButton->setObjectName(QStringLiteral("tabAudioButton"));
+        audioButton->setAutoRaise(true);
+        audioButton->setCursor(Qt::PointingHandCursor);
+        audioButton->setFocusPolicy(Qt::NoFocus);
+        audioButton->setFixedSize(16, 16);
+        audioButton->setIconSize(QSize(14, 14));
+        audioButton->setVisible(false);
+        connect(audioButton, &QToolButton::clicked, this, [this, view]() {
+            if (!view || !view->page())
+                return;
+
+            view->page()->setAudioMuted(!view->page()->isAudioMuted());
+            refreshTabPresentation(view);
+        });
+
+        iconsLayout->addWidget(faviconLabel);
+        iconsLayout->addWidget(audioButton);
+        m_tabBar->setTabButton(idx, QTabBar::LeftSide, iconsWidget);
+    } else {
+        faviconLabel = iconsWidget->findChild<QLabel *>(QStringLiteral("tabFaviconLabel"));
+        audioButton = iconsWidget->findChild<QToolButton *>(QStringLiteral("tabAudioButton"));
+    }
+
+    const QIcon pageIcon = (page && !page->icon().isNull())
+        ? page->icon()
+        : QIcon(QStringLiteral(":/app/ghost-small.ico"));
+
+    if (faviconLabel)
+        faviconLabel->setPixmap(pageIcon.pixmap(m_tabBar->iconSize()));
+
+    const bool showAudioIndicator = page && (page->recentlyAudible() || page->isAudioMuted());
+    if (audioButton) {
+        if (showAudioIndicator) {
+            const QString audioIconName = page->isAudioMuted()
+                ? QStringLiteral("volume-x")
+                : QStringLiteral("volume-2");
+            audioButton->setIcon(QIcon(iconPath(audioIconName)));
+            audioButton->setToolTip(page->isAudioMuted() ? QStringLiteral("Unmute Tab") : QStringLiteral("Mute Tab"));
+            audioButton->setVisible(true);
+            audioButton->raise();
+            iconsWidget->updateGeometry();
+        } else {
+            audioButton->setIcon(QIcon());
+            audioButton->setToolTip(QString());
+            audioButton->setVisible(false);
+            iconsWidget->updateGeometry();
+        }
+    }
+
+    m_tabBar->setTabIcon(idx, QIcon());
+    m_tabBar->setTabText(idx, label.left(34));
 }
 
 void MainWindow::attachSettingsBridge(QWebEngineView *view)
@@ -912,6 +1098,14 @@ QWebEngineView *MainWindow::currentWebView() const
     return qobject_cast<QWebEngineView *>(m_pageStack->currentWidget());
 }
 
+int MainWindow::tabIndexForView(QWebEngineView *view) const
+{
+    if (!view || !m_pageStack)
+        return -1;
+
+    return m_pageStack->indexOf(view);
+}
+
 QUrl MainWindow::homePageUrl() const
 {
     const QUrl configured = m_settings->homePageUrl();
@@ -931,6 +1125,76 @@ QUrl MainWindow::startupPageUrl() const
     if (startup == QLatin1String("specificPages"))
         return homePageUrl();
     return newTabUrl();
+}
+
+QString MainWindow::sessionStatePath() const
+{
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (configDir.isEmpty())
+        configDir = QCoreApplication::applicationDirPath();
+
+    QDir dir(configDir);
+    dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("session.json"));
+}
+
+void MainWindow::saveSessionState() const
+{
+    if (!m_settings || !m_pageStack || !m_tabBar)
+        return;
+
+    QJsonArray tabs;
+    for (int i = 0; i < m_pageStack->count(); ++i) {
+        auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i));
+        if (!view)
+            continue;
+
+        const QUrl url = view->url().isValid() ? view->url() : newTabUrl();
+        tabs.append(url.toString());
+    }
+
+    QJsonObject root {
+        { QStringLiteral("currentIndex"), m_tabBar->currentIndex() },
+        { QStringLiteral("tabs"), tabs },
+    };
+
+    QFile file(sessionStatePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+bool MainWindow::restoreSessionState()
+{
+    if (!m_settings || m_settings->startupBehavior() != QLatin1String("lastSession"))
+        return false;
+
+    QFile file(sessionStatePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject())
+        return false;
+
+    const QJsonObject root = doc.object();
+    const QJsonArray tabs = root.value(QStringLiteral("tabs")).toArray();
+    if (tabs.isEmpty())
+        return false;
+
+    for (const QJsonValue &tabValue : tabs) {
+        const QString urlText = tabValue.toString().trimmed();
+        const QUrl url = urlText.isEmpty() ? newTabUrl() : QUrl(urlText);
+        addTab(url.isValid() ? url : newTabUrl());
+    }
+
+    if (m_tabBar->count() > 0) {
+        const int currentIndex = root.value(QStringLiteral("currentIndex")).toInt(0);
+        m_tabBar->setCurrentIndex(qBound(0, currentIndex, m_tabBar->count() - 1));
+    }
+
+    return true;
 }
 
 QUrl MainWindow::searchUrlForQuery(const QString &query) const
@@ -970,6 +1234,99 @@ QUrl MainWindow::resolveInternalUrl(const QString &page) const
     if (it != internalPages.end())
         return QUrl(*it);
     return {};
+}
+
+QUrl MainWindow::normalizedYouTubeUrl(const QUrl &url) const
+{
+    if (!m_settings || !m_settings->value(QStringLiteral("content.youtubeShortsAsNormalVideos")).toBool())
+        return url;
+
+    if (!url.isValid())
+        return url;
+
+    const QString host = url.host().toLower();
+    if (host != QLatin1String("youtube.com")
+        && host != QLatin1String("www.youtube.com")
+        && host != QLatin1String("m.youtube.com")) {
+        return url;
+    }
+
+    const QString path = url.path();
+    if (!path.startsWith(QLatin1String("/shorts/")))
+        return url;
+
+    const QStringList segments = path.split(QLatin1Char('/'), Qt::SkipEmptyParts);
+    if (segments.size() < 2 || segments.at(0) != QLatin1String("shorts"))
+        return url;
+
+    const QString videoId = segments.at(1).trimmed();
+    if (videoId.isEmpty())
+        return url;
+
+    QUrl normalized(url);
+    normalized.setPath(QStringLiteral("/watch"));
+
+    QUrlQuery query(normalized);
+    query.removeAllQueryItems(QStringLiteral("v"));
+    query.addQueryItem(QStringLiteral("v"), videoId);
+    normalized.setQuery(query);
+    return normalized;
+}
+
+QString MainWindow::siteSettingValue(const QString &path, const QString &fallback) const
+{
+    if (!m_settings)
+        return fallback;
+
+    const QString value = m_settings->value(path).toString().trimmed();
+    return value.isEmpty() ? fallback : value;
+}
+
+void MainWindow::applyFeaturePermission(QWebEnginePage *page, const QUrl &origin, QWebEnginePage::Feature feature)
+{
+    if (!page)
+        return;
+
+    auto policyFor = [](const QString &value) {
+        if (value == QLatin1String("allow"))
+            return QWebEnginePage::PermissionGrantedByUser;
+        if (value == QLatin1String("block"))
+            return QWebEnginePage::PermissionDeniedByUser;
+        return QWebEnginePage::PermissionUnknown;
+    };
+
+    switch (feature) {
+    case QWebEnginePage::Notifications:
+        page->setFeaturePermission(origin, feature,
+            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.notifications"), QStringLiteral("ask"))));
+        break;
+    case QWebEnginePage::Geolocation:
+        page->setFeaturePermission(origin, feature,
+            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.location"), QStringLiteral("ask"))));
+        break;
+    case QWebEnginePage::MediaAudioCapture:
+        page->setFeaturePermission(origin, feature,
+            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask"))));
+        break;
+    case QWebEnginePage::MediaVideoCapture:
+        page->setFeaturePermission(origin, feature,
+            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask"))));
+        break;
+    case QWebEnginePage::MediaAudioVideoCapture: {
+        const QString cameraPolicy = siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask"));
+        const QString microphonePolicy = siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask"));
+        const QString combinedPolicy = (cameraPolicy == QLatin1String("block") || microphonePolicy == QLatin1String("block"))
+            ? QStringLiteral("block")
+            : (cameraPolicy == QLatin1String("allow") && microphonePolicy == QLatin1String("allow"))
+                ? QStringLiteral("allow")
+                : QStringLiteral("ask");
+        page->setFeaturePermission(origin, feature, policyFor(combinedPolicy));
+        break;
+    }
+    default:
+        page->setFeaturePermission(origin, feature, QWebEnginePage::PermissionUnknown);
+        break;
+    }
 }
 
 bool MainWindow::isSettingsUrl(const QUrl &url) const

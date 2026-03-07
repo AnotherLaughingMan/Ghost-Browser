@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(GhostBrowser VERSION 0.1.1 LANGUAGES CXX)
+project(GhostBrowser VERSION 0.1.2 LANGUAGES CXX)
 
 # ---------- x64 Assembly support ----------
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)

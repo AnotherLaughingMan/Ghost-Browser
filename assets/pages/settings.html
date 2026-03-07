@@ -161,16 +161,37 @@
   .setting-row:first-child { border-radius: 8px 8px 0 0; }
   .setting-row:last-child { border-radius: 0 0 8px 8px; margin-bottom: 0; }
   .setting-row:only-child { border-radius: 8px; }
+  .setting-row[data-open-section] { cursor: pointer; }
   .setting-row:hover { background: #2E2E42; }
 
   .setting-row .label {
     font-size: 14px;
     color: #E0E0E0;
   }
+  .setting-row .label-line {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
   .setting-row .sublabel {
     font-size: 12px;
     color: #888;
     margin-top: 2px;
+  }
+  .setting-row .status-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 20px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: #F4A261;
+    color: #111;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.25px;
+    text-transform: uppercase;
   }
   .setting-row .chevron {
     width: 16px; height: 16px;
@@ -669,7 +690,7 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/></svg>
         About Ghost
       </div>
-      <div class="version">v 0.1.1</div>
+      <div class="version">v 0.1.2</div>
     </div>
   </nav>
 
@@ -682,13 +703,19 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Profile name and icon</div>
+            <div class="label-line">
+              <div class="label">Profile name and icon</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label">Import bookmarks and settings</div>
+            <div class="label-line">
+              <div class="label">Import bookmarks and settings</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -696,7 +723,10 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px;">
           <div>
-            <div class="label">Ghost is your default browser</div>
+            <div class="label-line">
+              <div class="label">Ghost is your default browser</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
           </div>
         </div>
       </div>
@@ -722,13 +752,15 @@
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div class="label">New tab page shows</div>
           <select class="setting-select" data-setting-path="general.homePage">
-            <option value="ghost://newtab" selected>Dashboard</option>
+            <option value="ghost://newtab" selected>Ghost dashboard</option>
             <option value="about:blank">Blank page</option>
-            <option value="ghost://newtab">Homepage</option>
           </select>
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
-          <div class="label">Customize new tab page</div>
+          <div class="label-line">
+            <div class="label">Customize new tab page</div>
+            <span class="status-tag">Coming Soon</span>
+          </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
       </div>
@@ -804,10 +836,17 @@
           </div>
           <div class="toggle on" data-setting-path="content.fullScreenVideo"></div>
         </div>
-        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+        <div class="setting-row">
+          <div>
+            <div class="label">View YouTube Shorts as normal videos</div>
+            <div class="sublabel">Open YouTube Shorts links as standard watch pages with the normal player controls</div>
+          </div>
+          <div class="toggle on" data-setting-path="content.youtubeShortsAsNormalVideos"></div>
+        </div>
+        <div class="setting-row" data-open-section="site-settings" style="border-radius: 0 0 8px 8px;">
           <div>
             <div class="label">Site settings</div>
-            <div class="sublabel">Permissions and per-site controls are the next content phase</div>
+            <div class="sublabel">Default per-site permissions and content controls</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -838,7 +877,10 @@
         </div>
         <div class="setting-row">
           <div>
-            <div class="label">Block fingerprinting</div>
+            <div class="label-line">
+              <div class="label">Block fingerprinting</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Prevent sites from identifying your device</div>
           </div>
           <div class="toggle on" data-setting-path="protection.blockFingerprinting"></div>
@@ -859,7 +901,7 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Send "Do Not Track" request</div>
+            <div class="label">Send &quot;Do Not Track&quot; request</div>
             <div class="sublabel">Tell sites you don't want to be tracked</div>
           </div>
           <div class="toggle on" data-setting-path="privacy.doNotTrack"></div>
@@ -890,7 +932,10 @@
         <div class="section-title">Security</div>
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Safe Browsing</div>
+            <div class="label-line">
+              <div class="label">Safe Browsing</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Protect against dangerous sites and downloads</div>
           </div>
           <div class="toggle on" data-setting-path="protection.safeBrowsing"></div>
@@ -901,6 +946,149 @@
             <div class="sublabel">Always use secure connections</div>
           </div>
           <div class="toggle" data-setting-path="privacy.httpsOnly"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SITE SETTINGS -->
+    <div class="panel" id="site-settings">
+      <h2>Site settings</h2>
+      <div class="section">
+        <div class="setting-row" data-open-section="content" style="border-radius: 8px;">
+          <div>
+            <div class="label">Back to Content</div>
+            <div class="sublabel">Return to general content settings</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Default permissions</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">JavaScript</div>
+            <div class="sublabel">Allow or block JavaScript by default on websites</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.javascript">
+            <option value="allow" selected>Allow</option>
+            <option value="block">Block</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Pop-ups and redirects</div>
+            <div class="sublabel">Control whether sites can open new windows by default</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.popups">
+            <option value="block" selected>Block</option>
+            <option value="allow">Allow</option>
+          </select>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Location</div>
+            <div class="sublabel">Default behavior when a site requests your location</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.location">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow</option>
+            <option value="block">Block</option>
+          </select>
+        </div>
+        <div class="setting-row" data-open-section="site-settings-notifications">
+          <div>
+            <div class="label">Notifications</div>
+            <div class="sublabel">Choose the default notification permission behavior for websites</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+        <div class="setting-row" data-open-section="site-settings-camera-microphone" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Camera &amp; microphone</div>
+            <div class="sublabel">Set the default access policy for capture devices</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <!-- SITE SETTINGS: NOTIFICATIONS -->
+    <div class="panel" id="site-settings-notifications">
+      <h2>Notifications</h2>
+      <div class="section">
+        <div class="setting-row" data-open-section="site-settings" style="border-radius: 8px;">
+          <div>
+            <div class="label">Back to Site settings</div>
+            <div class="sublabel">Return to the Site settings page</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Default behavior</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Sites can ask to send notifications</div>
+            <div class="sublabel">Show a permission prompt when a website wants to send notifications</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.notifications">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow automatically</option>
+            <option value="block">Block automatically</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Current default</div>
+            <div class="sublabel" id="notificationsDefaultSummary">Ask before sites can send notifications.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SITE SETTINGS: CAMERA & MICROPHONE -->
+    <div class="panel" id="site-settings-camera-microphone">
+      <h2>Camera &amp; microphone</h2>
+      <div class="section">
+        <div class="setting-row" data-open-section="site-settings" style="border-radius: 8px;">
+          <div>
+            <div class="label">Back to Site settings</div>
+            <div class="sublabel">Return to the Site settings page</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Default behavior</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Camera</div>
+            <div class="sublabel">Default behavior when a site wants to use your camera</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.camera">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow automatically</option>
+            <option value="block">Block automatically</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Microphone</div>
+            <div class="sublabel">Default behavior when a site wants to use your microphone</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.microphone">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow automatically</option>
+            <option value="block">Block automatically</option>
+          </select>
+        </div>
+      </div>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px;">
+          <div>
+            <div class="label">Current defaults</div>
+            <div class="sublabel" id="cameraMicrophoneDefaultSummary">Camera: Ask before access. Microphone: Ask before access.</div>
+          </div>
         </div>
       </div>
     </div>
@@ -921,7 +1109,10 @@
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label">Manage search engines</div>
+            <div class="label-line">
+              <div class="label">Manage search engines</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -934,7 +1125,10 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px;">
           <div>
-            <div class="label">Manage extensions</div>
+            <div class="label-line">
+              <div class="label">Manage extensions</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">View and configure installed browser extensions</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -948,21 +1142,30 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Password Manager</div>
+            <div class="label-line">
+              <div class="label">Password Manager</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Manage saved passwords</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="setting-row">
           <div>
-            <div class="label">Payment methods</div>
+            <div class="label-line">
+              <div class="label">Payment methods</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Manage saved payment methods</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label">Addresses and more</div>
+            <div class="label-line">
+              <div class="label">Addresses and more</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Manage saved addresses for faster form filling</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -976,7 +1179,10 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Display language</div>
+            <div class="label-line">
+              <div class="label">Display language</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Ghost is displayed in this language</div>
           </div>
           <span class="value">English (United States)</span>
@@ -1023,14 +1229,20 @@
       <div class="section">
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label">Show a caret in pages</div>
+            <div class="label-line">
+              <div class="label">Show a caret in pages</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Navigate pages with a text cursor</div>
           </div>
           <div class="toggle" data-setting-path="accessibility.caretBrowsing"></div>
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label">Force high contrast</div>
+            <div class="label-line">
+              <div class="label">Force high contrast</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Improve readability on all sites</div>
           </div>
           <div class="toggle" data-setting-path="accessibility.highContrast"></div>
@@ -1051,13 +1263,26 @@
         </div>
         <div class="setting-row">
           <div>
-            <div class="label">Continue running background apps when Ghost is closed</div>
+            <div class="label-line">
+              <div class="label">Continue running background apps when Ghost is closed</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
           </div>
           <div class="toggle" data-setting-path="system.backgroundApps"></div>
         </div>
+        <div class="setting-row" data-open-url="ghost://codec-test">
+          <div>
+            <div class="label">Codec test</div>
+            <div class="sublabel">Open the internal media codec verification page</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label">Proxy settings</div>
+            <div class="label-line">
+              <div class="label">Proxy settings</div>
+              <span class="status-tag">Coming Soon</span>
+            </div>
             <div class="sublabel">Configure network proxy</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
@@ -1128,16 +1353,43 @@
   const sidebar = document.querySelector('.sidebar');
   const panels = document.querySelectorAll('.panel');
 
+  function showSection(sectionId, activeSidebarSection = sectionId) {
+    panels.forEach(p => p.classList.toggle('active', p.id === sectionId));
+    sidebar.querySelectorAll('a').forEach(a => {
+      a.classList.toggle('active', a.dataset.section === activeSidebarSection);
+    });
+  }
+
   sidebar.addEventListener('click', function(e) {
     const link = e.target.closest('a[data-section]');
     if (!link) return;
     e.preventDefault();
 
-    sidebar.querySelectorAll('a').forEach(a => a.classList.remove('active'));
-    link.classList.add('active');
-
     const sectionId = link.dataset.section;
-    panels.forEach(p => p.classList.toggle('active', p.id === sectionId));
+    showSection(sectionId, sectionId);
+  });
+
+  document.addEventListener('click', function(e) {
+    const row = e.target.closest('.setting-row[data-open-section]');
+    if (!row) return;
+    e.preventDefault();
+
+    const sectionId = row.dataset.openSection;
+    if (!sectionId) return;
+
+    const activeSidebarSection = sectionId.startsWith('site-settings') ? 'content' : sectionId;
+    showSection(sectionId, activeSidebarSection);
+  });
+
+  document.addEventListener('click', function(e) {
+    const row = e.target.closest('.setting-row[data-open-url]');
+    if (!row) return;
+    e.preventDefault();
+
+    const targetUrl = row.dataset.openUrl;
+    if (!targetUrl) return;
+
+    window.location.href = targetUrl;
   });
 
   // ── Top bar navigation (settings vs history vs cookies view switching) ──

@@ -33,7 +33,20 @@
       "type": "object",
       "properties": {
         "autoplay": { "type": "boolean" },
-        "fullScreenVideo": { "type": "boolean" }
+        "fullScreenVideo": { "type": "boolean" },
+        "youtubeShortsAsNormalVideos": { "type": "boolean" },
+        "siteSettings": {
+          "type": "object",
+          "properties": {
+            "javascript": { "type": "string", "enum": ["allow", "block"] },
+            "popups": { "type": "string", "enum": ["allow", "block"] },
+            "notifications": { "type": "string", "enum": ["ask", "allow", "block"] },
+            "location": { "type": "string", "enum": ["ask", "allow", "block"] },
+            "camera": { "type": "string", "enum": ["ask", "allow", "block"] },
+            "microphone": { "type": "string", "enum": ["ask", "allow", "block"] }
+          },
+          "additionalProperties": false
+        }
       },
       "additionalProperties": false
     },
@@ -68,6 +81,25 @@
         "hardwareAcceleration": { "type": "boolean" },
         "backgroundApps": { "type": "boolean" },
         "proxyMode": { "type": "string", "enum": ["system", "none", "manual"] }
+      },
+      "additionalProperties": false
+    },
+    "protection": {
+      "type": "object",
+      "properties": {
+        "trackingLevel": { "type": "string", "enum": ["standard", "aggressive", "disabled"] },
+        "httpsUpgrade": { "type": "boolean" },
+        "blockFingerprinting": { "type": "boolean" },
+        "blockScripts": { "type": "boolean" },
+        "safeBrowsing": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "accessibility": {
+      "type": "object",
+      "properties": {
+        "caretBrowsing": { "type": "boolean" },
+        "highContrast": { "type": "boolean" }
       },
       "additionalProperties": false
     }

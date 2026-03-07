@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QMainWindow>
 #include <QPoint>
+#include <QWebEnginePage>
 
 QT_BEGIN_NAMESPACE
 class QHBoxLayout;
@@ -68,9 +69,14 @@ private:
     void applySystemSettings();
     void configureProfile();
     void applyViewSettings(QWebEngineView *view);
+    void applyPerViewContentRules(QWebEngineView *view);
+    void applyFeaturePermission(QWebEnginePage *page, const QUrl &origin, QWebEnginePage::Feature feature);
+    void refreshTabPresentation(QWebEngineView *view);
     void attachSettingsBridge(QWebEngineView *view);
     void handleDownloadRequested(QWebEngineDownloadRequest *download);
     void clearBrowsingDataIfNeeded();
+    void saveSessionState() const;
+    bool restoreSessionState();
     void refreshIcons();
     void trackMouseForResize(QWidget *widget);
     Qt::Edges resizeEdgesForGlobalPos(const QPoint &globalPos) const;
@@ -83,6 +89,10 @@ private:
     QUrl startupPageUrl() const;
     QUrl searchUrlForQuery(const QString &query) const;
     QUrl resolveInternalUrl(const QString &page) const;
+    QUrl normalizedYouTubeUrl(const QUrl &url) const;
+    QString sessionStatePath() const;
+    QString siteSettingValue(const QString &path, const QString &fallback) const;
+    int tabIndexForView(QWebEngineView *view) const;
     bool isSettingsUrl(const QUrl &url) const;
     bool looksLikeUrl(const QString &input) const;
     QString iconPath(const QString &name) const;

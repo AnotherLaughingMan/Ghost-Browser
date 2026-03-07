@@ -7,9 +7,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Bumped Ghost Browser app version to `0.1.2`
+
+---
+
+## [0.1.1] - 2026-03-07
+
 ### Added
 - Downloads settings phase: users can now choose the default download folder directly from `ghost://settings`
 - Privacy/settings actions: `Clear browsing data` and `Reset settings` are now wired to the native backend from `ghost://settings`
+- Content setting: `View YouTube Shorts as normal videos` rewrites `/shorts/<id>` URLs to standard YouTube watch pages
+- Site Settings phase: `ghost://settings > Content > Site settings` now wires default controls for JavaScript, pop-ups, notifications, location, camera, and microphone
+- Protection settings phase: tracker/ad blocking levels, navigation-focused HTTPS upgrade, and third-party script blocking now execute in the request interceptor
+- Protection safe-browsing phase: requests to curated malicious/phishing test hosts and risky download types are now blocked when `Safe Browsing` is enabled
+- Theme phase: `Same as system` now follows the OS color scheme in both the native shell and `ghost://settings`
+- Privacy phase: `Block third-party cookies` is now enforced through the Qt WebEngine cookie filter hook
+- System settings now include a direct link to the internal codec test page
 - Chromium GPU flags (`--enable-gpu-rasterization`, `--enable-zero-copy`, `--ignore-gpu-blocklist`, `BackForwardCache`) for faster page compositing and instant back/forward navigation
 - DNS prefetching enabled on all web views to reduce cross-origin lookup latency on media-heavy sites
 - Smooth scroll animation enabled by default
@@ -22,13 +36,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `LocalStorageEnabled` and `JavascriptEnabled` explicitly set on every web view
 
 ### Changed
-- Bumped Ghost Browser app version to `0.1.1`
 - Browser tabs are now wider in the custom title bar for better readability
 - Closing the final remaining tab now closes the browser window
 - The hamburger menu button no longer shows the extra toolbutton popup arrow
 - HTTP disk cache bumped from 256 MB to 512 MB for better media-site performance
 - Request interceptor now caches DNT/HTTPS-only settings instead of re-reading per request
 - "Clear browsing data" now also clears persistent browsing history
+- Cookie loading now retries during async startup so existing cookies are less likely to appear empty until sites are revisited
 
 ---
 

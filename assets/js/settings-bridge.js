@@ -20,6 +20,19 @@ function defaultSettings() {
             fontSize: 16,
             zoomLevel: 100,
         },
+        content: {
+            autoplay: true,
+            fullScreenVideo: true,
+            youtubeShortsAsNormalVideos: true,
+            siteSettings: {
+                javascript: 'allow',
+                popups: 'block',
+                notifications: 'ask',
+                location: 'ask',
+                camera: 'ask',
+                microphone: 'ask',
+            },
+        },
         privacy: {
             doNotTrack: true,
             blockThirdPartyCookies: true,
@@ -113,10 +126,41 @@ function applyState(settings) {
     if (downloadPathLabel) {
         downloadPathLabel.textContent = settings.downloads.defaultPath || 'Downloads';
     }
+    const notificationsDefaultSummary = document.getElementById('notificationsDefaultSummary');
+    if (notificationsDefaultSummary) {
+        notificationsDefaultSummary.textContent = formatPermissionSummary(settings.content.siteSettings.notifications, 'notifications');
+    }
+    const cameraMicrophoneDefaultSummary = document.getElementById('cameraMicrophoneDefaultSummary');
+    if (cameraMicrophoneDefaultSummary) {
+        cameraMicrophoneDefaultSummary.textContent = `Camera: ${formatPermissionSummary(settings.content.siteSettings.camera, 'camera')} Microphone: ${formatPermissionSummary(settings.content.siteSettings.microphone, 'microphone')}`;
+    }
     applyTheme(settings.appearance.theme);
 }
+function formatPermissionSummary(value, target) {
+    switch (target) {
+        case 'notifications':
+            if (value === 'allow')
+                return 'Sites can send notifications automatically.';
+            if (value === 'block')
+                return 'Sites are blocked from sending notifications.';
+            return 'Ask before sites can send notifications.';
+        case 'camera':
+            if (value === 'allow')
+                return 'Allow automatically.';
+            if (value === 'block')
+                return 'Blocked automatically.';
+            return 'Ask before access.';
+        case 'microphone':
+            if (value === 'allow')
+                return 'Allow automatically.';
+            if (value === 'block')
+                return 'Blocked automatically.';
+            return 'Ask before access.';
+    }
+}
 function applyTheme(theme) {
-    const useLight = theme === 'light';
+    const useLight = theme === 'light'
+        || (theme === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
     document.body.classList.toggle('light-theme', useLight);
 }
 // ── History grouping helpers ──

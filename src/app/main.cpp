@@ -18,7 +18,7 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     app.setApplicationName("Ghost Browser");
     app.setOrganizationName("Ghost");
-    app.setApplicationVersion("0.1.1");
+    app.setApplicationVersion("0.1.2");
 
     MainWindow window;
     window.show();

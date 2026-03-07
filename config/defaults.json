@@ -13,7 +13,16 @@
   },
   "content": {
     "autoplay": true,
-    "fullScreenVideo": true
+    "fullScreenVideo": true,
+    "youtubeShortsAsNormalVideos": true,
+    "siteSettings": {
+      "javascript": "allow",
+      "popups": "block",
+      "notifications": "ask",
+      "location": "ask",
+      "camera": "ask",
+      "microphone": "ask"
+    }
   },
   "privacy": {
     "doNotTrack": true,
