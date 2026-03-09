@@ -2,8 +2,10 @@
 
 #include <QObject>
 #include <QPointer>
+#include <QString>
 #include <QtWebEngineCore/QWebEngineUrlRequestInterceptor>
 
+class ProtectionDiagnostics;
 class SettingsManager;
 class QWebEngineUrlRequestInfo;
 
@@ -18,7 +20,9 @@ class GhostRequestInterceptor final : public QWebEngineUrlRequestInterceptor
     };
 
 public:
-    explicit GhostRequestInterceptor(SettingsManager *settings, QObject *parent = nullptr);
+    explicit GhostRequestInterceptor(SettingsManager *settings,
+                                     ProtectionDiagnostics *diagnostics,
+                                     QObject *parent = nullptr);
 
     void interceptRequest(QWebEngineUrlRequestInfo &info) override;
 
@@ -31,12 +35,16 @@ private:
     static bool isThirdPartyRequest(const QUrl &requestUrl, const QUrl &firstPartyUrl, const QUrl &initiator);
     static bool hostMatchesList(const QString &host, const QStringList &patterns);
     static bool hasBlockedDownloadSuffix(const QString &path);
-    bool shouldUpgradeRequest(const QWebEngineUrlRequestInfo &info) const;
-    bool shouldBlockRequest(const QWebEngineUrlRequestInfo &info) const;
+    bool shouldUpgradeRequest(const QWebEngineUrlRequestInfo &info, QString *detail = nullptr) const;
+    bool shouldBlockRequest(const QWebEngineUrlRequestInfo &info,
+                            QString *category = nullptr,
+                            QString *detail = nullptr) const;
 
     QPointer<SettingsManager> m_settings;
+    QPointer<ProtectionDiagnostics> m_diagnostics;
     bool m_dntEnabled   = false;
     bool m_httpsOnly    = false;
+    bool m_blockFingerprinting = false;
     bool m_httpsUpgrade = false;
     bool m_blockScripts = false;
     bool m_safeBrowsing = false;

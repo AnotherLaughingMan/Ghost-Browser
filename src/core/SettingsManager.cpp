@@ -4,7 +4,9 @@
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QJsonValue>
 #include <QStandardPaths>
 
@@ -46,11 +48,125 @@ bool SettingsManager::updateSetting(const QString &path, const QVariant &value)
     if (!setValueAtPath(path, QJsonValue::fromVariant(value)))
         return false;
 
-    if (!writeJsonFile(userSettingsPath(), m_settings))
+    if (!writeSettings())
         return false;
 
-    emit settingsChanged(getSettingsJson());
     return true;
+}
+
+QString SettingsManager::getSitePermissionRulesJson() const
+{
+    const QJsonValue rules = m_settings.value(QStringLiteral("content"))
+        .toObject()
+        .value(QStringLiteral("sitePermissionRules"));
+    return QString::fromUtf8(QJsonDocument(rules.toObject()).toJson(QJsonDocument::Compact));
+}
+
+bool SettingsManager::upsertSitePermissionRule(const QString &permissionType, const QString &origin, const QString &policy)
+{
+    const QString normalizedPermissionType = permissionType.trimmed().toLower();
+    const QString normalizedOrigin = normalizeOrigin(QUrl(origin.trimmed()));
+    const QString normalizedPolicy = policy.trimmed().toLower();
+    if (!isSupportedPermissionType(normalizedPermissionType)
+        || normalizedOrigin.isEmpty()
+        || (normalizedPolicy != QLatin1String("ask")
+            && normalizedPolicy != QLatin1String("allow")
+            && normalizedPolicy != QLatin1String("block"))) {
+        return false;
+    }
+
+    QJsonObject content = m_settings.value(QStringLiteral("content")).toObject();
+    QJsonObject rules = content.value(QStringLiteral("sitePermissionRules")).toObject();
+    QJsonArray entries = rules.value(normalizedPermissionType).toArray();
+
+    bool updated = false;
+    for (int i = 0; i < entries.size(); ++i) {
+        QJsonObject entry = entries.at(i).toObject();
+        if (entry.value(QStringLiteral("origin")).toString() != normalizedOrigin)
+            continue;
+
+        entry.insert(QStringLiteral("policy"), normalizedPolicy);
+        entries.replace(i, entry);
+        updated = true;
+        break;
+    }
+
+    if (!updated) {
+        entries.append(QJsonObject {
+            { QStringLiteral("origin"), normalizedOrigin },
+            { QStringLiteral("policy"), normalizedPolicy },
+        });
+    }
+
+    rules.insert(normalizedPermissionType, entries);
+    content.insert(QStringLiteral("sitePermissionRules"), rules);
+    m_settings.insert(QStringLiteral("content"), content);
+    return writeSettings();
+}
+
+bool SettingsManager::removeSitePermissionRule(const QString &permissionType, const QString &origin)
+{
+    const QString normalizedPermissionType = permissionType.trimmed().toLower();
+    const QString normalizedOrigin = normalizeOrigin(QUrl(origin.trimmed()));
+    if (!isSupportedPermissionType(normalizedPermissionType) || normalizedOrigin.isEmpty())
+        return false;
+
+    QJsonObject content = m_settings.value(QStringLiteral("content")).toObject();
+    QJsonObject rules = content.value(QStringLiteral("sitePermissionRules")).toObject();
+    QJsonArray entries = rules.value(normalizedPermissionType).toArray();
+    QJsonArray updatedEntries;
+    bool removed = false;
+
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        if (entry.value(QStringLiteral("origin")).toString() == normalizedOrigin) {
+            removed = true;
+            continue;
+        }
+        updatedEntries.append(entry);
+    }
+
+    if (!removed)
+        return false;
+
+    rules.insert(normalizedPermissionType, updatedEntries);
+    content.insert(QStringLiteral("sitePermissionRules"), rules);
+    m_settings.insert(QStringLiteral("content"), content);
+    return writeSettings();
+}
+
+QString SettingsManager::sitePermissionRule(const QString &permissionType, const QUrl &origin) const
+{
+    const QString normalizedPermissionType = permissionType.trimmed().toLower();
+    const QString normalizedOrigin = normalizeOrigin(origin);
+    if (!isSupportedPermissionType(normalizedPermissionType) || normalizedOrigin.isEmpty())
+        return {};
+
+    const QJsonObject rules = m_settings.value(QStringLiteral("content"))
+        .toObject()
+        .value(QStringLiteral("sitePermissionRules"))
+        .toObject();
+    const QJsonArray entries = rules.value(normalizedPermissionType).toArray();
+    for (const QJsonValue &value : entries) {
+        const QJsonObject entry = value.toObject();
+        if (entry.value(QStringLiteral("origin")).toString() == normalizedOrigin)
+            return entry.value(QStringLiteral("policy")).toString();
+    }
+
+    return {};
+}
+
+bool SettingsManager::rememberSitePermissionRequest(const QString &permissionType, const QUrl &origin)
+{
+    const QString normalizedPermissionType = permissionType.trimmed().toLower();
+    const QString normalizedOrigin = normalizeOrigin(origin);
+    if (!isSupportedPermissionType(normalizedPermissionType) || normalizedOrigin.isEmpty())
+        return false;
+
+    if (!sitePermissionRule(normalizedPermissionType, origin).isEmpty())
+        return false;
+
+    return upsertSitePermissionRule(normalizedPermissionType, normalizedOrigin, QStringLiteral("ask"));
 }
 
 QString SettingsManager::chooseDownloadPath()
@@ -79,10 +195,9 @@ QString SettingsManager::chooseDownloadPath()
 bool SettingsManager::resetToDefaults()
 {
     m_settings = builtInDefaults();
-    if (!writeJsonFile(userSettingsPath(), m_settings))
+    if (!writeSettings())
         return false;
 
-    emit settingsChanged(getSettingsJson());
     return true;
 }
 
@@ -100,7 +215,7 @@ void SettingsManager::load()
     const QJsonObject userSettings = readJsonFile(userSettingsPath());
     m_settings = mergeObjects(defaults, userSettings);
 
-    if (!userSettings.contains(QStringLiteral("version")))
+    if (userSettings != m_settings)
         writeJsonFile(userSettingsPath(), m_settings);
 }
 
@@ -118,6 +233,8 @@ QJsonObject SettingsManager::builtInDefaults() const
             { QStringLiteral("showBookmarksBar"), false },
             { QStringLiteral("fontSize"), 16 },
             { QStringLiteral("zoomLevel"), 100 },
+            { QStringLiteral("statusOverlayMode"), QStringLiteral("frosted") },
+            { QStringLiteral("statusOverlayOpacity"), 42 },
         } },
         { QStringLiteral("content"), QJsonObject {
             { QStringLiteral("autoplay"), true },
@@ -130,6 +247,12 @@ QJsonObject SettingsManager::builtInDefaults() const
                 { QStringLiteral("location"), QStringLiteral("ask") },
                 { QStringLiteral("camera"), QStringLiteral("ask") },
                 { QStringLiteral("microphone"), QStringLiteral("ask") },
+            } },
+            { QStringLiteral("sitePermissionRules"), QJsonObject {
+                { QStringLiteral("notifications"), QJsonArray {} },
+                { QStringLiteral("location"), QJsonArray {} },
+                { QStringLiteral("camera"), QJsonArray {} },
+                { QStringLiteral("microphone"), QJsonArray {} },
             } },
         } },
         { QStringLiteral("privacy"), QJsonObject {
@@ -200,6 +323,15 @@ bool SettingsManager::writeJsonFile(const QString &path, const QJsonObject &obje
     return true;
 }
 
+bool SettingsManager::writeSettings()
+{
+    if (!writeJsonFile(userSettingsPath(), m_settings))
+        return false;
+
+    emit settingsChanged(getSettingsJson());
+    return true;
+}
+
 QVariant SettingsManager::valueAtPath(const QString &path) const
 {
     QStringList parts = path.split(QLatin1Char('.'), Qt::SkipEmptyParts);
@@ -236,6 +368,34 @@ bool SettingsManager::setValueAtPath(const QString &path, const QJsonValue &valu
 
     setRecursive(setRecursive, m_settings, 0);
     return true;
+}
+
+QString SettingsManager::normalizeOrigin(const QUrl &url)
+{
+    if (!url.isValid() || url.scheme().isEmpty() || url.host().isEmpty())
+        return {};
+
+    QUrl normalized(url);
+    normalized.setPath(QString());
+    normalized.setQuery(QString());
+    normalized.setFragment(QString());
+    normalized.setUserInfo(QString());
+
+    QString origin = normalized.toString(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment | QUrl::RemoveUserInfo);
+    if (origin.endsWith(QLatin1Char('/')))
+        origin.chop(1);
+    return origin;
+}
+
+bool SettingsManager::isSupportedPermissionType(const QString &permissionType)
+{
+    static const QStringList supportedTypes {
+        QStringLiteral("notifications"),
+        QStringLiteral("location"),
+        QStringLiteral("camera"),
+        QStringLiteral("microphone"),
+    };
+    return supportedTypes.contains(permissionType);
 }
 
 QJsonObject SettingsManager::mergeObjects(const QJsonObject &base, const QJsonObject &overlay)

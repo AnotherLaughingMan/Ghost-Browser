@@ -20,11 +20,13 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 
 # ---------- Qt 6.9+ ----------
-find_package(Qt6 6.9 REQUIRED COMPONENTS Widgets WebChannel WebEngineCore WebEngineWidgets)
+find_package(Qt6 6.9 REQUIRED COMPONENTS Network Sql Widgets WebChannel WebEngineCore WebEngineWidgets)
 
 # ---------- Sources ----------
 set(GHOST_SOURCES
     src/app/main.cpp
+    src/browser/FingerprintingProtection.cpp
+    src/browser/FingerprintingProtection.h
     src/browser/GhostRequestInterceptor.cpp
     src/browser/GhostRequestInterceptor.h
     src/core/asm_fallbacks.cpp
@@ -33,8 +35,12 @@ set(GHOST_SOURCES
     src/core/CookieManager.h
     src/core/HistoryManager.cpp
     src/core/HistoryManager.h
+    src/core/ProtectionDiagnostics.cpp
+    src/core/ProtectionDiagnostics.h
     src/core/SettingsManager.cpp
     src/core/SettingsManager.h
+    src/core/WeatherService.cpp
+    src/core/WeatherService.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
 )
@@ -85,6 +91,8 @@ endif()
 
 # ---------- Link ----------
 target_link_libraries(GhostBrowser PRIVATE
+    Qt6::Network
+    Qt6::Sql
     Qt6::WebChannel
     Qt6::WebEngineCore
     Qt6::Widgets

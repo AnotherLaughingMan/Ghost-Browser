@@ -1,12 +1,16 @@
 #pragma once
 
 #include <QByteArray>
+#include <QEvent>
 #include <QMainWindow>
+#include <QMoveEvent>
 #include <QPoint>
+#include <QResizeEvent>
 #include <QWebEnginePage>
 
 QT_BEGIN_NAMESPACE
 class QHBoxLayout;
+class QLabel;
 class QVBoxLayout;
 class QLineEdit;
 class QStackedWidget;
@@ -21,7 +25,9 @@ QT_END_NAMESPACE
 class CookieManager;
 class GhostRequestInterceptor;
 class HistoryManager;
+class ProtectionDiagnostics;
 class SettingsManager;
+class WeatherService;
 
 class MainWindow : public QMainWindow
 {
@@ -33,7 +39,10 @@ public:
 
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
+    void moveEvent(QMoveEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 #ifdef Q_OS_WIN
     bool nativeEvent(const QByteArray &eventType, void *message, qintptr *result) override;
 #endif
@@ -60,10 +69,12 @@ private:
     void buildTitleBar();
     void buildNavBar();
     void buildBookmarksBar();
+    void buildStatusBar();
     void buildContentArea();
     void applyStyles();
     void applyAppearanceSettings();
     void applyContentSettings();
+    void applyProtectionSettings();
     void applyPrivacySettings();
     void applyDownloadSettings();
     void applySystemSettings();
@@ -77,7 +88,12 @@ private:
     void clearBrowsingDataIfNeeded();
     void saveSessionState() const;
     bool restoreSessionState();
+    void saveWindowPlacement() const;
+    void restoreWindowPlacement();
     void refreshIcons();
+    void refreshStatusBar();
+    void ensureStatusOverlayOnTop();
+    void updateStatusOverlayGeometry();
     void trackMouseForResize(QWidget *widget);
     Qt::Edges resizeEdgesForGlobalPos(const QPoint &globalPos) const;
     void updateResizeCursor(const QPoint &globalPos);
@@ -91,7 +107,10 @@ private:
     QUrl resolveInternalUrl(const QString &page) const;
     QUrl normalizedYouTubeUrl(const QUrl &url) const;
     QString sessionStatePath() const;
+    QString windowPlacementPath() const;
     QString siteSettingValue(const QString &path, const QString &fallback) const;
+    QString permissionPolicyForOrigin(const QString &permissionType, const QUrl &origin, const QString &defaultPolicy) const;
+    QWebEnginePage::PermissionPolicy promptForPermissionDecision(const QUrl &origin, const QStringList &permissionTypes, bool *rememberChoice);
     int tabIndexForView(QWebEngineView *view) const;
     bool isSettingsUrl(const QUrl &url) const;
     bool looksLikeUrl(const QString &input) const;
@@ -109,7 +128,11 @@ private:
     // Navigation bar
     QWidget      *m_navBar        = nullptr;
     QWidget      *m_bookmarksBar  = nullptr;
+    QWidget      *m_statusBar     = nullptr;
+    QWidget      *m_statusOverlayBackdrop = nullptr;
     QLineEdit    *m_urlBar        = nullptr;
+    QLabel       *m_statusLabel   = nullptr;
+    QLabel       *m_statusStateLabel = nullptr;
     QToolButton  *m_backBtn       = nullptr;
     QToolButton  *m_forwardBtn    = nullptr;
     QToolButton  *m_reloadBtn     = nullptr;
@@ -117,16 +140,21 @@ private:
     QToolButton  *m_menuBtn       = nullptr;
 
     // Content
+    QWidget *m_contentArea = nullptr;
     QStackedWidget *m_pageStack   = nullptr;
     SettingsManager *m_settings   = nullptr;
     QWebEngineProfile *m_profile  = nullptr;
     GhostRequestInterceptor *m_requestInterceptor = nullptr;
     HistoryManager *m_history = nullptr;
     CookieManager *m_cookies = nullptr;
+    ProtectionDiagnostics *m_protectionDiagnostics = nullptr;
+    WeatherService *m_weatherService = nullptr;
 
     // State
     bool  m_darkMode = true;
     bool  m_dragging = false;
     bool  m_trackingResize = false;
+    bool  m_restoringWindowPlacement = false;
+    QString m_hoveredLink;
     QPoint m_dragPos;
 };

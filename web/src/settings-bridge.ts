@@ -18,6 +18,8 @@ interface GhostSettings {
     showBookmarksBar: boolean;
     fontSize: number;
     zoomLevel: number;
+    statusOverlayMode: 'off' | 'transparent' | 'frosted' | 'solid';
+    statusOverlayOpacity: number;
   };
   content: {
     autoplay: boolean;
@@ -31,6 +33,7 @@ interface GhostSettings {
       camera: 'ask' | 'allow' | 'block';
       microphone: 'ask' | 'allow' | 'block';
     };
+    sitePermissionRules: SitePermissionRules;
   };
   privacy: {
     doNotTrack: boolean;
@@ -67,7 +70,8 @@ declare interface Window {
   GhostSettingsBridge: {
     initializeSettingsPage: () => Promise<void>;
     refreshHistory?: () => Promise<void>;
-    refreshCookies?: () => Promise<void>;
+    refreshCookies?: (forceReload?: boolean) => Promise<void>;
+    refreshProtection?: () => Promise<void>;
   };
   QWebChannel?: new (transport: unknown, callback: (channel: { objects: Record<string, ChannelObjects> }) => void) => void;
   qt?: { webChannelTransport?: unknown };
@@ -80,10 +84,14 @@ interface ChannelObjects {
 interface GhostBridge {
   // Qt 6 QWebChannel: all invokable methods return Promise<T> when called without a callback.
   getSettingsJson(): Promise<string>;
+  getSitePermissionRulesJson(): Promise<string>;
   updateSetting(path: string, value: unknown): void;
   chooseDownloadPath(): Promise<string>;
   resetToDefaults(): Promise<boolean>;
   requestClearBrowsingData(): void;
+  upsertSitePermissionRule(permissionType: string, origin: string, policy: string): Promise<boolean>;
+  removeSitePermissionRule(permissionType: string, origin: string): Promise<boolean>;
+  settingsChanged: { connect: (callback: (json: string) => void) => void };
 }
 
 interface GhostHistoryBridge {
@@ -101,6 +109,12 @@ interface GhostCookieBridge {
   clearAll(): void;
   reload(): void;
   cookiesChanged: { connect: (callback: () => void) => void };
+}
+
+interface GhostProtectionBridge {
+  getEventsJson(): Promise<string>;
+  clear(): void;
+  eventsChanged: { connect: (callback: () => void) => void };
 }
 
 interface CookieEntry {
@@ -121,6 +135,31 @@ interface HistoryEntry {
   time: string;
 }
 
+interface ProtectionEvent {
+  action: 'blocked' | 'upgraded';
+  category: string;
+  url: string;
+  host: string;
+  page: string;
+  detail: string;
+  time: string;
+}
+
+type SitePermissionPolicy = 'ask' | 'allow' | 'block';
+type SitePermissionType = 'notifications' | 'location' | 'camera' | 'microphone';
+
+interface SitePermissionRule {
+  origin: string;
+  policy: SitePermissionPolicy;
+}
+
+interface SitePermissionRules {
+  notifications: SitePermissionRule[];
+  location: SitePermissionRule[];
+  camera: SitePermissionRule[];
+  microphone: SitePermissionRule[];
+}
+
 type GhostTheme = 'dark' | 'light' | 'system';
 
 function defaultSettings(): GhostSettings {
@@ -136,6 +175,8 @@ function defaultSettings(): GhostSettings {
       showBookmarksBar: false,
       fontSize: 16,
       zoomLevel: 100,
+      statusOverlayMode: 'frosted',
+      statusOverlayOpacity: 42,
     },
     content: {
       autoplay: true,
@@ -148,6 +189,12 @@ function defaultSettings(): GhostSettings {
         location: 'ask',
         camera: 'ask',
         microphone: 'ask',
+      },
+      sitePermissionRules: {
+        notifications: [],
+        location: [],
+        camera: [],
+        microphone: [],
       },
     },
     privacy: {
@@ -199,6 +246,7 @@ interface Bridges {
   settings: GhostBridge | null;
   history: GhostHistoryBridge | null;
   cookies: GhostCookieBridge | null;
+  protection: GhostProtectionBridge | null;
 }
 
 function connectBridge(): Promise<Bridges> {
@@ -215,12 +263,13 @@ function connectBridge(): Promise<Bridges> {
             settings: (channel.objects.ghostSettings as GhostBridge) ?? null,
             history: (channel.objects.ghostHistory as GhostHistoryBridge) ?? null,
             cookies: (channel.objects.ghostCookies as GhostCookieBridge) ?? null,
+            protection: (channel.objects.ghostProtection as GhostProtectionBridge) ?? null,
           });
         });
         return;
       }
       if (++attempts >= MAX_ATTEMPTS) {
-        resolve({ settings: null, history: null, cookies: null });
+        resolve({ settings: null, history: null, cookies: null, protection: null });
         return;
       }
       setTimeout(tryConnect, 50);
@@ -267,23 +316,101 @@ function applyState(settings: GhostSettings): void {
     );
   }
 
+  const locationDefaultSummary = document.getElementById('locationDefaultSummary');
+  if (locationDefaultSummary) {
+    locationDefaultSummary.textContent = formatPermissionSummary(
+      settings.content.siteSettings.location,
+      'location'
+    );
+  }
+
   const cameraMicrophoneDefaultSummary = document.getElementById('cameraMicrophoneDefaultSummary');
   if (cameraMicrophoneDefaultSummary) {
     cameraMicrophoneDefaultSummary.textContent = `Camera: ${formatPermissionSummary(settings.content.siteSettings.camera, 'camera')} Microphone: ${formatPermissionSummary(settings.content.siteSettings.microphone, 'microphone')}`;
   }
 
+  renderSitePermissionPanel('notifications', settings.content.sitePermissionRules.notifications);
+  renderSitePermissionPanel('location', settings.content.sitePermissionRules.location);
+  renderSitePermissionPanel('camera', settings.content.sitePermissionRules.camera);
+  renderSitePermissionPanel('microphone', settings.content.sitePermissionRules.microphone);
+
   applyTheme(settings.appearance.theme);
+}
+
+function permissionTypeLabel(permissionType: SitePermissionType): string {
+  switch (permissionType) {
+    case 'notifications':
+      return 'Notifications';
+    case 'location':
+      return 'Location';
+    case 'camera':
+      return 'Camera';
+    case 'microphone':
+      return 'Microphone';
+  }
+}
+
+function policyLabel(policy: SitePermissionPolicy): string {
+  switch (policy) {
+    case 'allow':
+      return 'Allow';
+    case 'block':
+      return 'Block';
+    case 'ask':
+      return 'Ask';
+  }
+}
+
+function renderSitePermissionPanel(permissionType: SitePermissionType, rules: SitePermissionRule[]): void {
+  const list = document.getElementById(`${permissionType}SitePermissionList`);
+  if (!list) {
+    return;
+  }
+
+  const sortedRules = [...rules].sort((left, right) => left.origin.localeCompare(right.origin));
+  if (sortedRules.length === 0) {
+    list.innerHTML = `<div class="site-permission-empty">No saved ${permissionTypeLabel(permissionType).toLowerCase()} site rules yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  for (const rule of sortedRules) {
+    const row = document.createElement('div');
+    row.className = 'site-permission-entry';
+    row.innerHTML = `
+      <div>
+        <div class="entry-title">${escapeHtml(rule.origin)}</div>
+        <div class="entry-meta">Current rule: ${escapeHtml(policyLabel(rule.policy))}</div>
+      </div>
+      <div class="site-permission-actions">
+        <select class="setting-select site-permission-select" data-permission-type="${permissionType}" data-origin="${escapeHtml(rule.origin)}">
+          <option value="ask" ${rule.policy === 'ask' ? 'selected' : ''}>Ask</option>
+          <option value="allow" ${rule.policy === 'allow' ? 'selected' : ''}>Allow</option>
+          <option value="block" ${rule.policy === 'block' ? 'selected' : ''}>Block</option>
+        </select>
+        <button class="secondary-button site-permission-remove" data-permission-type="${permissionType}" data-origin="${escapeHtml(rule.origin)}">Remove</button>
+      </div>
+    `;
+    fragment.appendChild(row);
+  }
+
+  list.appendChild(fragment);
 }
 
 function formatPermissionSummary(
   value: 'ask' | 'allow' | 'block',
-  target: 'notifications' | 'camera' | 'microphone'
+  target: 'notifications' | 'location' | 'camera' | 'microphone'
 ): string {
   switch (target) {
     case 'notifications':
       if (value === 'allow') return 'Sites can send notifications automatically.';
       if (value === 'block') return 'Sites are blocked from sending notifications.';
       return 'Ask before sites can send notifications.';
+    case 'location':
+      if (value === 'allow') return 'Sites can access your location automatically.';
+      if (value === 'block') return 'Sites are blocked from accessing your location.';
+      return 'Ask before sharing your location.';
     case 'camera':
       if (value === 'allow') return 'Allow automatically.';
       if (value === 'block') return 'Blocked automatically.';
@@ -452,12 +579,118 @@ function renderCookies(entries: CookieEntry[], container: HTMLElement, filter: s
   container.appendChild(fragment);
 }
 
+function renderCookieLoading(container: HTMLElement): void {
+  container.innerHTML = '<div class="cookie-empty">Loading cookies…</div>';
+}
+
+function renderProtectionDiagnostics(
+  entries: ProtectionEvent[],
+  list: HTMLElement,
+  summary: HTMLElement | null,
+  siteFilter: string,
+  categoryFilter: string
+): void {
+  const normalizedSiteFilter = siteFilter.trim().toLowerCase();
+  const filtered = entries.filter((entry) => {
+    const host = (entry.host || domainFromUrl(entry.url)).toLowerCase();
+    const page = entry.page.toLowerCase();
+    const siteMatches = !normalizedSiteFilter
+      || host.includes(normalizedSiteFilter)
+      || entry.url.toLowerCase().includes(normalizedSiteFilter)
+      || page.includes(normalizedSiteFilter);
+
+    let categoryMatches = true;
+    if (categoryFilter.startsWith('action:')) {
+      categoryMatches = entry.action === categoryFilter.slice(7);
+    } else if (categoryFilter.startsWith('category:')) {
+      categoryMatches = entry.category === categoryFilter.slice(9);
+    }
+
+    return siteMatches && categoryMatches;
+  });
+
+  const blockedCount = filtered.filter((entry) => entry.action === 'blocked').length;
+  const upgradedCount = filtered.filter((entry) => entry.action === 'upgraded').length;
+  const latestCategory = filtered[0]?.category || 'none';
+
+  if (summary) {
+    summary.innerHTML = `
+      <div class="protection-stat">
+        <div class="stat-label">Blocked Requests</div>
+        <div class="stat-value">${blockedCount}</div>
+      </div>
+      <div class="protection-stat">
+        <div class="stat-label">HTTPS Upgrades</div>
+        <div class="stat-value">${upgradedCount}</div>
+      </div>
+      <div class="protection-stat">
+        <div class="stat-label">Latest Category</div>
+        <div class="stat-value">${escapeHtml(latestCategory.replace(/-/g, ' '))}</div>
+      </div>
+    `;
+  }
+
+  if (entries.length === 0) {
+    list.innerHTML = '<div class="protection-empty">No protection activity recorded yet.</div>';
+    return;
+  }
+
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="protection-empty">No protection activity matches the current filters.</div>';
+    return;
+  }
+
+  list.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  filtered.slice(0, 20).forEach((entry) => {
+    const row = document.createElement('div');
+    row.className = 'protection-entry';
+    const title = entry.action === 'blocked'
+      ? `Blocked ${entry.category.replace(/-/g, ' ')}`
+      : 'Upgraded insecure request';
+    row.innerHTML = `
+      <div class="protection-badge ${entry.action}">${escapeHtml(entry.action)}</div>
+      <div>
+        <div class="entry-title">${escapeHtml(title)}</div>
+        <div class="entry-meta">${escapeHtml(entry.host || entry.url)}</div>
+        <div class="entry-detail">${escapeHtml(entry.detail)}</div>
+        ${entry.page ? `<div class="entry-meta">From ${escapeHtml(entry.page)}</div>` : ''}
+      </div>
+      <div class="entry-time">${escapeHtml(formatTime(entry.time))}</div>
+    `;
+    fragment.appendChild(row);
+  });
+
+  list.appendChild(fragment);
+}
+
 async function initializeSettingsPage(): Promise<void> {
-  const { settings: bridge, history: historyBridge, cookies: cookieBridge } = await connectBridge();
+  const {
+    settings: bridge,
+    history: historyBridge,
+    cookies: cookieBridge,
+    protection: protectionBridge,
+  } = await connectBridge();
   // Qt 6 QWebChannel methods return Promises — must be awaited.
   let settings = bridge ? JSON.parse(await bridge.getSettingsJson()) as GhostSettings : defaultSettings();
 
+  async function refreshSettingsState(): Promise<void> {
+    if (!bridge) {
+      return;
+    }
+
+    settings = JSON.parse(await bridge.getSettingsJson()) as GhostSettings;
+    applyState(settings);
+  }
+
   applyState(settings);
+
+  if (bridge) {
+    bridge.settingsChanged.connect((json: string) => {
+      settings = JSON.parse(json) as GhostSettings;
+      applyState(settings);
+    });
+  }
 
   document.addEventListener('click', (event) => {
     const toggle = (event.target as HTMLElement).closest<HTMLElement>('.toggle[data-setting-path]');
@@ -524,10 +757,78 @@ async function initializeSettingsPage(): Promise<void> {
         }
       } else if (action === 'clearBrowsingData') {
         bridge.requestClearBrowsingData();
+      } else if (action === 'clearProtectionDiagnostics') {
+        protectionBridge?.clear();
+        return;
       }
 
-      settings = JSON.parse(await bridge.getSettingsJson()) as GhostSettings;
-      applyState(settings);
+      await refreshSettingsState();
+    });
+  });
+
+  document.addEventListener('change', async (event) => {
+    const select = (event.target as HTMLElement).closest<HTMLSelectElement>('.site-permission-select');
+    if (!select || !bridge) {
+      return;
+    }
+
+    const permissionType = select.dataset.permissionType;
+    const origin = select.dataset.origin;
+    if (!permissionType || !origin) {
+      return;
+    }
+
+    await bridge.upsertSitePermissionRule(permissionType, origin, select.value);
+    await refreshSettingsState();
+  });
+
+  document.addEventListener('click', async (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.site-permission-remove');
+    if (!button || !bridge) {
+      return;
+    }
+
+    const permissionType = button.dataset.permissionType;
+    const origin = button.dataset.origin;
+    if (!permissionType || !origin) {
+      return;
+    }
+
+    await bridge.removeSitePermissionRule(permissionType, origin);
+    await refreshSettingsState();
+  });
+
+  document.querySelectorAll<HTMLFormElement>('form[data-site-permission-form]').forEach((form) => {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!bridge) {
+        return;
+      }
+
+      const permissionType = form.dataset.sitePermissionForm as SitePermissionType | undefined;
+      const originInput = form.querySelector<HTMLInputElement>('input[name="origin"]');
+      const policySelect = form.querySelector<HTMLSelectElement>('select[name="policy"]');
+      if (!permissionType || !originInput || !policySelect) {
+        return;
+      }
+
+      const rawOrigin = originInput.value.trim();
+      try {
+        const parsed = new URL(rawOrigin);
+        if (!parsed.protocol || !parsed.hostname) {
+          throw new Error('Invalid origin');
+        }
+      } catch {
+        originInput.setCustomValidity('Enter a full origin like https://example.com');
+        originInput.reportValidity();
+        return;
+      }
+
+      originInput.setCustomValidity('');
+      await bridge.upsertSitePermissionRule(permissionType, rawOrigin, policySelect.value);
+      form.reset();
+      policySelect.value = 'ask';
+      await refreshSettingsState();
     });
   });
 
@@ -577,12 +878,33 @@ async function initializeSettingsPage(): Promise<void> {
   const cookieList = document.getElementById('cookieList');
   const cookieSearch = document.getElementById('cookieSearch') as HTMLInputElement | null;
   const cookieClearRange = document.getElementById('cookieClearRange') as HTMLSelectElement | null;
+  const protectionList = document.getElementById('protectionDiagnosticsList');
+  const protectionSummary = document.getElementById('protectionSummary');
+  const protectionSiteFilter = document.getElementById('protectionSiteFilter') as HTMLInputElement | null;
+  const protectionCategoryFilter = document.getElementById('protectionCategoryFilter') as HTMLSelectElement | null;
   let cookieEntries: CookieEntry[] = [];
   let cookieFilter = '';
+  let cookieRefreshToken = 0;
+  let protectionEntries: ProtectionEvent[] = [];
+  let protectionSiteQuery = '';
+  let protectionCategoryQuery = 'all';
 
-  async function refreshCookies(): Promise<void> {
+  async function refreshCookies(forceReload = false): Promise<void> {
     if (!cookieBridge || !cookieList) return;
+
+    if (forceReload) {
+      cookieRefreshToken += 1;
+      renderCookieLoading(cookieList);
+      cookieBridge.reload();
+      return;
+    }
+
+    const refreshToken = ++cookieRefreshToken;
     cookieEntries = JSON.parse(await cookieBridge.getCookiesJson()) as CookieEntry[];
+    if (refreshToken !== cookieRefreshToken) {
+      return;
+    }
+
     renderCookies(cookieEntries, cookieList, cookieFilter, (idx: number) => {
       cookieBridge!.deleteByIndex(idx);
     });
@@ -590,8 +912,78 @@ async function initializeSettingsPage(): Promise<void> {
 
   window.GhostSettingsBridge.refreshCookies = refreshCookies;
 
+  function refreshProtectionCategoryOptions(): void {
+    if (!protectionCategoryFilter) {
+      return;
+    }
+
+    const previousValue = protectionCategoryFilter.value || protectionCategoryQuery;
+    const categories = Array.from(new Set(protectionEntries.map((entry) => entry.category))).sort();
+    protectionCategoryFilter.innerHTML = `
+      <option value="all">All activity</option>
+      <option value="action:blocked">Blocked only</option>
+      <option value="action:upgraded">HTTPS upgrades only</option>
+      ${categories.map((category) => `<option value="category:${escapeHtml(category)}">${escapeHtml(category.replace(/-/g, ' '))}</option>`).join('')}
+    `;
+
+    const hasPreviousValue = Array.from(protectionCategoryFilter.options).some((option) => option.value === previousValue);
+    protectionCategoryQuery = hasPreviousValue ? previousValue : 'all';
+    protectionCategoryFilter.value = protectionCategoryQuery;
+  }
+
+  async function refreshProtection(): Promise<void> {
+    if (!protectionBridge || !protectionList) return;
+    protectionEntries = JSON.parse(await protectionBridge.getEventsJson()) as ProtectionEvent[];
+    refreshProtectionCategoryOptions();
+    renderProtectionDiagnostics(
+      protectionEntries,
+      protectionList,
+      protectionSummary,
+      protectionSiteQuery,
+      protectionCategoryQuery
+    );
+  }
+
+  window.GhostSettingsBridge.refreshProtection = refreshProtection;
+
   if (cookieBridge) {
-    cookieBridge.cookiesChanged.connect(refreshCookies);
+    cookieBridge.cookiesChanged.connect(() => {
+      refreshCookies();
+    });
+  }
+
+  if (protectionBridge) {
+    protectionBridge.eventsChanged.connect(refreshProtection);
+  }
+
+  if (protectionSiteFilter) {
+    protectionSiteFilter.addEventListener('input', () => {
+      protectionSiteQuery = protectionSiteFilter.value.toLowerCase();
+      if (protectionList) {
+        renderProtectionDiagnostics(
+          protectionEntries,
+          protectionList,
+          protectionSummary,
+          protectionSiteQuery,
+          protectionCategoryQuery
+        );
+      }
+    });
+  }
+
+  if (protectionCategoryFilter) {
+    protectionCategoryFilter.addEventListener('change', () => {
+      protectionCategoryQuery = protectionCategoryFilter.value;
+      if (protectionList) {
+        renderProtectionDiagnostics(
+          protectionEntries,
+          protectionList,
+          protectionSummary,
+          protectionSiteQuery,
+          protectionCategoryQuery
+        );
+      }
+    });
   }
 
   if (cookieSearch) {
@@ -616,7 +1008,8 @@ async function initializeSettingsPage(): Promise<void> {
 
   // Eagerly populate as soon as bridge is ready, regardless of which tab is visible
   refreshHistory();
-  refreshCookies();
+  refreshCookies(true);
+  refreshProtection();
 }
 
 window.GhostSettingsBridge = {

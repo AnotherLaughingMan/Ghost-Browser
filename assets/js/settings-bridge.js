@@ -19,6 +19,8 @@ function defaultSettings() {
             showBookmarksBar: false,
             fontSize: 16,
             zoomLevel: 100,
+            statusOverlayMode: 'frosted',
+            statusOverlayOpacity: 42,
         },
         content: {
             autoplay: true,
@@ -31,6 +33,12 @@ function defaultSettings() {
                 location: 'ask',
                 camera: 'ask',
                 microphone: 'ask',
+            },
+            sitePermissionRules: {
+                notifications: [],
+                location: [],
+                camera: [],
+                microphone: [],
             },
         },
         privacy: {
@@ -89,12 +97,13 @@ function connectBridge() {
                         settings: channel.objects.ghostSettings ?? null,
                         history: channel.objects.ghostHistory ?? null,
                         cookies: channel.objects.ghostCookies ?? null,
+                        protection: channel.objects.ghostProtection ?? null,
                     });
                 });
                 return;
             }
             if (++attempts >= MAX_ATTEMPTS) {
-                resolve({ settings: null, history: null, cookies: null });
+                resolve({ settings: null, history: null, cookies: null, protection: null });
                 return;
             }
             setTimeout(tryConnect, 50);
@@ -130,11 +139,74 @@ function applyState(settings) {
     if (notificationsDefaultSummary) {
         notificationsDefaultSummary.textContent = formatPermissionSummary(settings.content.siteSettings.notifications, 'notifications');
     }
+    const locationDefaultSummary = document.getElementById('locationDefaultSummary');
+    if (locationDefaultSummary) {
+        locationDefaultSummary.textContent = formatPermissionSummary(settings.content.siteSettings.location, 'location');
+    }
     const cameraMicrophoneDefaultSummary = document.getElementById('cameraMicrophoneDefaultSummary');
     if (cameraMicrophoneDefaultSummary) {
         cameraMicrophoneDefaultSummary.textContent = `Camera: ${formatPermissionSummary(settings.content.siteSettings.camera, 'camera')} Microphone: ${formatPermissionSummary(settings.content.siteSettings.microphone, 'microphone')}`;
     }
+    renderSitePermissionPanel('notifications', settings.content.sitePermissionRules.notifications);
+    renderSitePermissionPanel('location', settings.content.sitePermissionRules.location);
+    renderSitePermissionPanel('camera', settings.content.sitePermissionRules.camera);
+    renderSitePermissionPanel('microphone', settings.content.sitePermissionRules.microphone);
     applyTheme(settings.appearance.theme);
+}
+function permissionTypeLabel(permissionType) {
+    switch (permissionType) {
+        case 'notifications':
+            return 'Notifications';
+        case 'location':
+            return 'Location';
+        case 'camera':
+            return 'Camera';
+        case 'microphone':
+            return 'Microphone';
+    }
+}
+function policyLabel(policy) {
+    switch (policy) {
+        case 'allow':
+            return 'Allow';
+        case 'block':
+            return 'Block';
+        case 'ask':
+            return 'Ask';
+    }
+}
+function renderSitePermissionPanel(permissionType, rules) {
+    const list = document.getElementById(`${permissionType}SitePermissionList`);
+    if (!list) {
+        return;
+    }
+    const sortedRules = [...rules].sort((left, right) => left.origin.localeCompare(right.origin));
+    if (sortedRules.length === 0) {
+        list.innerHTML = `<div class="site-permission-empty">No saved ${permissionTypeLabel(permissionType).toLowerCase()} site rules yet.</div>`;
+        return;
+    }
+    list.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    for (const rule of sortedRules) {
+        const row = document.createElement('div');
+        row.className = 'site-permission-entry';
+        row.innerHTML = `
+      <div>
+        <div class="entry-title">${escapeHtml(rule.origin)}</div>
+        <div class="entry-meta">Current rule: ${escapeHtml(policyLabel(rule.policy))}</div>
+      </div>
+      <div class="site-permission-actions">
+        <select class="setting-select site-permission-select" data-permission-type="${permissionType}" data-origin="${escapeHtml(rule.origin)}">
+          <option value="ask" ${rule.policy === 'ask' ? 'selected' : ''}>Ask</option>
+          <option value="allow" ${rule.policy === 'allow' ? 'selected' : ''}>Allow</option>
+          <option value="block" ${rule.policy === 'block' ? 'selected' : ''}>Block</option>
+        </select>
+        <button class="secondary-button site-permission-remove" data-permission-type="${permissionType}" data-origin="${escapeHtml(rule.origin)}">Remove</button>
+      </div>
+    `;
+        fragment.appendChild(row);
+    }
+    list.appendChild(fragment);
 }
 function formatPermissionSummary(value, target) {
     switch (target) {
@@ -144,6 +216,12 @@ function formatPermissionSummary(value, target) {
             if (value === 'block')
                 return 'Sites are blocked from sending notifications.';
             return 'Ask before sites can send notifications.';
+        case 'location':
+            if (value === 'allow')
+                return 'Sites can access your location automatically.';
+            if (value === 'block')
+                return 'Sites are blocked from accessing your location.';
+            return 'Ask before sharing your location.';
         case 'camera':
             if (value === 'allow')
                 return 'Allow automatically.';
@@ -301,11 +379,94 @@ function renderCookies(entries, container, filter, onDelete) {
     }
     container.appendChild(fragment);
 }
+function renderCookieLoading(container) {
+    container.innerHTML = '<div class="cookie-empty">Loading cookies…</div>';
+}
+function renderProtectionDiagnostics(entries, list, summary, siteFilter, categoryFilter) {
+    const normalizedSiteFilter = siteFilter.trim().toLowerCase();
+    const filtered = entries.filter((entry) => {
+        const host = (entry.host || domainFromUrl(entry.url)).toLowerCase();
+        const page = entry.page.toLowerCase();
+        const siteMatches = !normalizedSiteFilter
+            || host.includes(normalizedSiteFilter)
+            || entry.url.toLowerCase().includes(normalizedSiteFilter)
+            || page.includes(normalizedSiteFilter);
+        let categoryMatches = true;
+        if (categoryFilter.startsWith('action:')) {
+            categoryMatches = entry.action === categoryFilter.slice(7);
+        }
+        else if (categoryFilter.startsWith('category:')) {
+            categoryMatches = entry.category === categoryFilter.slice(9);
+        }
+        return siteMatches && categoryMatches;
+    });
+    const blockedCount = filtered.filter((entry) => entry.action === 'blocked').length;
+    const upgradedCount = filtered.filter((entry) => entry.action === 'upgraded').length;
+    const latestCategory = filtered[0]?.category || 'none';
+    if (summary) {
+        summary.innerHTML = `
+      <div class="protection-stat">
+        <div class="stat-label">Blocked Requests</div>
+        <div class="stat-value">${blockedCount}</div>
+      </div>
+      <div class="protection-stat">
+        <div class="stat-label">HTTPS Upgrades</div>
+        <div class="stat-value">${upgradedCount}</div>
+      </div>
+      <div class="protection-stat">
+        <div class="stat-label">Latest Category</div>
+        <div class="stat-value">${escapeHtml(latestCategory.replace(/-/g, ' '))}</div>
+      </div>
+    `;
+    }
+    if (entries.length === 0) {
+        list.innerHTML = '<div class="protection-empty">No protection activity recorded yet.</div>';
+        return;
+    }
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="protection-empty">No protection activity matches the current filters.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    filtered.slice(0, 20).forEach((entry) => {
+        const row = document.createElement('div');
+        row.className = 'protection-entry';
+        const title = entry.action === 'blocked'
+            ? `Blocked ${entry.category.replace(/-/g, ' ')}`
+            : 'Upgraded insecure request';
+        row.innerHTML = `
+      <div class="protection-badge ${entry.action}">${escapeHtml(entry.action)}</div>
+      <div>
+        <div class="entry-title">${escapeHtml(title)}</div>
+        <div class="entry-meta">${escapeHtml(entry.host || entry.url)}</div>
+        <div class="entry-detail">${escapeHtml(entry.detail)}</div>
+        ${entry.page ? `<div class="entry-meta">From ${escapeHtml(entry.page)}</div>` : ''}
+      </div>
+      <div class="entry-time">${escapeHtml(formatTime(entry.time))}</div>
+    `;
+        fragment.appendChild(row);
+    });
+    list.appendChild(fragment);
+}
 async function initializeSettingsPage() {
-    const { settings: bridge, history: historyBridge, cookies: cookieBridge } = await connectBridge();
+    const { settings: bridge, history: historyBridge, cookies: cookieBridge, protection: protectionBridge, } = await connectBridge();
     // Qt 6 QWebChannel methods return Promises — must be awaited.
     let settings = bridge ? JSON.parse(await bridge.getSettingsJson()) : defaultSettings();
+    async function refreshSettingsState() {
+        if (!bridge) {
+            return;
+        }
+        settings = JSON.parse(await bridge.getSettingsJson());
+        applyState(settings);
+    }
     applyState(settings);
+    if (bridge) {
+        bridge.settingsChanged.connect((json) => {
+            settings = JSON.parse(json);
+            applyState(settings);
+        });
+    }
     document.addEventListener('click', (event) => {
         const toggle = event.target.closest('.toggle[data-setting-path]');
         if (!toggle) {
@@ -365,8 +526,68 @@ async function initializeSettingsPage() {
             else if (action === 'clearBrowsingData') {
                 bridge.requestClearBrowsingData();
             }
-            settings = JSON.parse(await bridge.getSettingsJson());
-            applyState(settings);
+            else if (action === 'clearProtectionDiagnostics') {
+                protectionBridge?.clear();
+                return;
+            }
+            await refreshSettingsState();
+        });
+    });
+    document.addEventListener('change', async (event) => {
+        const select = event.target.closest('.site-permission-select');
+        if (!select || !bridge) {
+            return;
+        }
+        const permissionType = select.dataset.permissionType;
+        const origin = select.dataset.origin;
+        if (!permissionType || !origin) {
+            return;
+        }
+        await bridge.upsertSitePermissionRule(permissionType, origin, select.value);
+        await refreshSettingsState();
+    });
+    document.addEventListener('click', async (event) => {
+        const button = event.target.closest('.site-permission-remove');
+        if (!button || !bridge) {
+            return;
+        }
+        const permissionType = button.dataset.permissionType;
+        const origin = button.dataset.origin;
+        if (!permissionType || !origin) {
+            return;
+        }
+        await bridge.removeSitePermissionRule(permissionType, origin);
+        await refreshSettingsState();
+    });
+    document.querySelectorAll('form[data-site-permission-form]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!bridge) {
+                return;
+            }
+            const permissionType = form.dataset.sitePermissionForm;
+            const originInput = form.querySelector('input[name="origin"]');
+            const policySelect = form.querySelector('select[name="policy"]');
+            if (!permissionType || !originInput || !policySelect) {
+                return;
+            }
+            const rawOrigin = originInput.value.trim();
+            try {
+                const parsed = new URL(rawOrigin);
+                if (!parsed.protocol || !parsed.hostname) {
+                    throw new Error('Invalid origin');
+                }
+            }
+            catch {
+                originInput.setCustomValidity('Enter a full origin like https://example.com');
+                originInput.reportValidity();
+                return;
+            }
+            originInput.setCustomValidity('');
+            await bridge.upsertSitePermissionRule(permissionType, rawOrigin, policySelect.value);
+            form.reset();
+            policySelect.value = 'ask';
+            await refreshSettingsState();
         });
     });
     // ── History wiring ──
@@ -411,19 +632,82 @@ async function initializeSettingsPage() {
     const cookieList = document.getElementById('cookieList');
     const cookieSearch = document.getElementById('cookieSearch');
     const cookieClearRange = document.getElementById('cookieClearRange');
+    const protectionList = document.getElementById('protectionDiagnosticsList');
+    const protectionSummary = document.getElementById('protectionSummary');
+    const protectionSiteFilter = document.getElementById('protectionSiteFilter');
+    const protectionCategoryFilter = document.getElementById('protectionCategoryFilter');
     let cookieEntries = [];
     let cookieFilter = '';
-    async function refreshCookies() {
+    let cookieRefreshToken = 0;
+    let protectionEntries = [];
+    let protectionSiteQuery = '';
+    let protectionCategoryQuery = 'all';
+    async function refreshCookies(forceReload = false) {
         if (!cookieBridge || !cookieList)
             return;
+        if (forceReload) {
+            cookieRefreshToken += 1;
+            renderCookieLoading(cookieList);
+            cookieBridge.reload();
+            return;
+        }
+        const refreshToken = ++cookieRefreshToken;
         cookieEntries = JSON.parse(await cookieBridge.getCookiesJson());
+        if (refreshToken !== cookieRefreshToken) {
+            return;
+        }
         renderCookies(cookieEntries, cookieList, cookieFilter, (idx) => {
             cookieBridge.deleteByIndex(idx);
         });
     }
     window.GhostSettingsBridge.refreshCookies = refreshCookies;
+    function refreshProtectionCategoryOptions() {
+        if (!protectionCategoryFilter) {
+            return;
+        }
+        const previousValue = protectionCategoryFilter.value || protectionCategoryQuery;
+        const categories = Array.from(new Set(protectionEntries.map((entry) => entry.category))).sort();
+        protectionCategoryFilter.innerHTML = `
+      <option value="all">All activity</option>
+      <option value="action:blocked">Blocked only</option>
+      <option value="action:upgraded">HTTPS upgrades only</option>
+      ${categories.map((category) => `<option value="category:${escapeHtml(category)}">${escapeHtml(category.replace(/-/g, ' '))}</option>`).join('')}
+    `;
+        const hasPreviousValue = Array.from(protectionCategoryFilter.options).some((option) => option.value === previousValue);
+        protectionCategoryQuery = hasPreviousValue ? previousValue : 'all';
+        protectionCategoryFilter.value = protectionCategoryQuery;
+    }
+    async function refreshProtection() {
+        if (!protectionBridge || !protectionList)
+            return;
+        protectionEntries = JSON.parse(await protectionBridge.getEventsJson());
+        refreshProtectionCategoryOptions();
+        renderProtectionDiagnostics(protectionEntries, protectionList, protectionSummary, protectionSiteQuery, protectionCategoryQuery);
+    }
+    window.GhostSettingsBridge.refreshProtection = refreshProtection;
     if (cookieBridge) {
-        cookieBridge.cookiesChanged.connect(refreshCookies);
+        cookieBridge.cookiesChanged.connect(() => {
+            refreshCookies();
+        });
+    }
+    if (protectionBridge) {
+        protectionBridge.eventsChanged.connect(refreshProtection);
+    }
+    if (protectionSiteFilter) {
+        protectionSiteFilter.addEventListener('input', () => {
+            protectionSiteQuery = protectionSiteFilter.value.toLowerCase();
+            if (protectionList) {
+                renderProtectionDiagnostics(protectionEntries, protectionList, protectionSummary, protectionSiteQuery, protectionCategoryQuery);
+            }
+        });
+    }
+    if (protectionCategoryFilter) {
+        protectionCategoryFilter.addEventListener('change', () => {
+            protectionCategoryQuery = protectionCategoryFilter.value;
+            if (protectionList) {
+                renderProtectionDiagnostics(protectionEntries, protectionList, protectionSummary, protectionSiteQuery, protectionCategoryQuery);
+            }
+        });
     }
     if (cookieSearch) {
         cookieSearch.addEventListener('input', () => {
@@ -446,7 +730,8 @@ async function initializeSettingsPage() {
     }
     // Eagerly populate as soon as bridge is ready, regardless of which tab is visible
     refreshHistory();
-    refreshCookies();
+    refreshCookies(true);
+    refreshProtection();
 }
 window.GhostSettingsBridge = {
     initializeSettingsPage,

@@ -1,14 +1,18 @@
 #include "browser/GhostRequestInterceptor.h"
 
+#include "core/ProtectionDiagnostics.h"
 #include "core/SettingsManager.h"
 
 #include <QStringList>
 #include <QUrl>
 #include <QtWebEngineCore/QWebEngineUrlRequestInfo>
 
-GhostRequestInterceptor::GhostRequestInterceptor(SettingsManager *settings, QObject *parent)
+GhostRequestInterceptor::GhostRequestInterceptor(SettingsManager *settings,
+                                                 ProtectionDiagnostics *diagnostics,
+                                                 QObject *parent)
     : QWebEngineUrlRequestInterceptor(parent)
     , m_settings(settings)
+    , m_diagnostics(diagnostics)
 {
     refreshSettings();
 }
@@ -19,6 +23,7 @@ void GhostRequestInterceptor::refreshSettings()
         return;
     m_dntEnabled = m_settings->value(QStringLiteral("privacy.doNotTrack")).toBool();
     m_httpsOnly  = m_settings->value(QStringLiteral("privacy.httpsOnly")).toBool();
+    m_blockFingerprinting = m_settings->value(QStringLiteral("protection.blockFingerprinting")).toBool();
     m_httpsUpgrade = m_settings->value(QStringLiteral("protection.httpsUpgrade")).toBool();
     m_blockScripts = m_settings->value(QStringLiteral("protection.blockScripts")).toBool();
     m_safeBrowsing = m_settings->value(QStringLiteral("protection.safeBrowsing")).toBool();
@@ -37,12 +42,40 @@ void GhostRequestInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info)
     if (m_dntEnabled)
         info.setHttpHeader("DNT", "1");
 
-    if (shouldBlockRequest(info)) {
+    if (m_blockFingerprinting) {
+        info.setHttpHeader("Sec-CH-UA", "\"Ghost\";v=\"1\", \"Not A(Brand\";v=\"99\"");
+        info.setHttpHeader("Sec-CH-UA-Mobile", "?0");
+        info.setHttpHeader("Sec-CH-UA-Platform", "\"Windows\"");
+        info.setHttpHeader("Sec-CH-UA-Platform-Version", "\"15.0.0\"");
+        info.setHttpHeader("Sec-CH-UA-Arch", "\"x86\"");
+        info.setHttpHeader("Sec-CH-UA-Bitness", "\"64\"");
+    }
+
+    QString blockCategory;
+    QString blockDetail;
+    if (shouldBlockRequest(info, &blockCategory, &blockDetail)) {
+        if (m_diagnostics) {
+            const QUrl contextUrl = info.initiator().isValid() ? info.initiator() : info.firstPartyUrl();
+            m_diagnostics->recordEvent(QStringLiteral("blocked"),
+                                       blockCategory,
+                                       info.requestUrl(),
+                                       contextUrl,
+                                       blockDetail);
+        }
         info.block(true);
         return;
     }
 
-    if (shouldUpgradeRequest(info)) {
+    QString upgradeDetail;
+    if (shouldUpgradeRequest(info, &upgradeDetail)) {
+        if (m_diagnostics) {
+            const QUrl contextUrl = info.initiator().isValid() ? info.initiator() : info.firstPartyUrl();
+            m_diagnostics->recordEvent(QStringLiteral("upgraded"),
+                                       QStringLiteral("https"),
+                                       info.requestUrl(),
+                                       contextUrl,
+                                       upgradeDetail);
+        }
         QUrl upgraded = info.requestUrl();
         upgraded.setScheme(QStringLiteral("https"));
         info.redirect(upgraded);
@@ -115,14 +148,17 @@ bool GhostRequestInterceptor::hasBlockedDownloadSuffix(const QString &path)
     return false;
 }
 
-bool GhostRequestInterceptor::shouldUpgradeRequest(const QWebEngineUrlRequestInfo &info) const
+bool GhostRequestInterceptor::shouldUpgradeRequest(const QWebEngineUrlRequestInfo &info, QString *detail) const
 {
     const QUrl requestUrl = info.requestUrl();
     if (requestUrl.scheme() != QLatin1String("http") || isLocalHost(requestUrl))
         return false;
 
-    if (m_httpsOnly)
+    if (m_httpsOnly) {
+        if (detail)
+            *detail = QStringLiteral("HTTPS-Only mode redirected an insecure request.");
         return true;
+    }
 
     if (!m_httpsUpgrade)
         return false;
@@ -132,13 +168,17 @@ bool GhostRequestInterceptor::shouldUpgradeRequest(const QWebEngineUrlRequestInf
     case QWebEngineUrlRequestInfo::ResourceTypeSubFrame:
     case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadMainFrame:
     case QWebEngineUrlRequestInfo::ResourceTypeNavigationPreloadSubFrame:
+        if (detail)
+            *detail = QStringLiteral("Protection upgraded a navigation request to HTTPS.");
         return true;
     default:
         return false;
     }
 }
 
-bool GhostRequestInterceptor::shouldBlockRequest(const QWebEngineUrlRequestInfo &info) const
+bool GhostRequestInterceptor::shouldBlockRequest(const QWebEngineUrlRequestInfo &info,
+                                                 QString *category,
+                                                 QString *detail) const
 {
     const QUrl requestUrl = info.requestUrl();
     if (!requestUrl.isValid() || isLocalHost(requestUrl))
@@ -158,16 +198,30 @@ bool GhostRequestInterceptor::shouldBlockRequest(const QWebEngineUrlRequestInfo 
             QStringLiteral("download-malware.wicar.org")
         };
 
-        if (hostMatchesList(host, blockedHosts))
+        if (hostMatchesList(host, blockedHosts)) {
+            if (category)
+                *category = QStringLiteral("safe-browsing");
+            if (detail)
+                *detail = QStringLiteral("Blocked a request to a known malicious or phishing test host.");
             return true;
+        }
 
-        if (info.isDownload() && hasBlockedDownloadSuffix(requestUrl.path()))
+        if (info.isDownload() && hasBlockedDownloadSuffix(requestUrl.path())) {
+            if (category)
+                *category = QStringLiteral("unsafe-download");
+            if (detail)
+                *detail = QStringLiteral("Blocked a risky download type while Safe Browsing was enabled.");
             return true;
+        }
     }
 
     if (m_blockScripts
         && thirdParty
         && info.resourceType() == QWebEngineUrlRequestInfo::ResourceTypeScript) {
+        if (category)
+            *category = QStringLiteral("third-party-script");
+        if (detail)
+            *detail = QStringLiteral("Blocked a third-party script request.");
         return true;
     }
 
@@ -219,6 +273,10 @@ bool GhostRequestInterceptor::shouldBlockRequest(const QWebEngineUrlRequestInfo 
         case QWebEngineUrlRequestInfo::ResourceTypeXhr:
         case QWebEngineUrlRequestInfo::ResourceTypeSubResource:
         case QWebEngineUrlRequestInfo::ResourceTypeImage:
+            if (category)
+                *category = QStringLiteral("tracker");
+            if (detail)
+                *detail = QStringLiteral("Blocked a tracker or ad request under Standard protection.");
             return true;
         default:
             return false;
@@ -229,6 +287,10 @@ bool GhostRequestInterceptor::shouldBlockRequest(const QWebEngineUrlRequestInfo 
         case QWebEngineUrlRequestInfo::ResourceTypeSubFrame:
             return false;
         default:
+            if (category)
+                *category = QStringLiteral("tracker");
+            if (detail)
+                *detail = QStringLiteral("Blocked a tracker or ad request under Aggressive protection.");
             return true;
         }
     case TrackingLevel::Disabled:

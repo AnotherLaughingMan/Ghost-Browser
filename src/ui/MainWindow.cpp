@@ -1,17 +1,22 @@
 #include "MainWindow.h"
 
+#include "browser/FingerprintingProtection.h"
 #include "browser/GhostRequestInterceptor.h"
 #include "core/CookieManager.h"
 #include "core/HistoryManager.h"
+#include "core/ProtectionDiagnostics.h"
 #include "core/SettingsManager.h"
+#include "core/WeatherService.h"
 
 #include <QAction>
+#include <QAbstractButton>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QEvent>
+#include <QGraphicsDropShadowEffect>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
@@ -20,17 +25,23 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCheckBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QNetworkProxy>
+#include <QNetworkProxyFactory>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QSizePolicy>
 #include <QStandardPaths>
 #include <QStackedWidget>
 #include <QTabBar>
 #include <QTimer>
 #include <QToolButton>
+#include <QPushButton>
 #include <QStringList>
 #include <QStyleHints>
 #include <QUrl>
@@ -51,6 +62,216 @@
 #include <windowsx.h>
 #endif
 
+namespace {
+
+QString permissionTypeLabel(const QString &permissionType)
+{
+    if (permissionType == QLatin1String("notifications"))
+        return QStringLiteral("notifications");
+    if (permissionType == QLatin1String("location"))
+        return QStringLiteral("your location");
+    if (permissionType == QLatin1String("camera"))
+        return QStringLiteral("your camera");
+    if (permissionType == QLatin1String("microphone"))
+        return QStringLiteral("your microphone");
+    return permissionType;
+}
+
+QString joinPermissionLabels(const QStringList &permissionTypes)
+{
+    QStringList labels;
+    for (const QString &permissionType : permissionTypes)
+        labels.append(permissionTypeLabel(permissionType));
+
+    if (labels.isEmpty())
+        return QStringLiteral("this feature");
+    if (labels.size() == 1)
+        return labels.front();
+    if (labels.size() == 2)
+        return labels.at(0) + QStringLiteral(" and ") + labels.at(1);
+
+    const QString last = labels.takeLast();
+    return labels.join(QStringLiteral(", ")) + QStringLiteral(", and ") + last;
+}
+
+QWebEnginePage::PermissionPolicy policyForValue(const QString &value)
+{
+    if (value == QLatin1String("allow"))
+        return QWebEnginePage::PermissionGrantedByUser;
+    if (value == QLatin1String("block"))
+        return QWebEnginePage::PermissionDeniedByUser;
+    return QWebEnginePage::PermissionUnknown;
+}
+
+QString overlayScrollbarScriptSource(bool darkMode)
+{
+        const QString thumb = darkMode ? QStringLiteral("rgba(164, 177, 217, 0.62)") : QStringLiteral("rgba(107, 120, 151, 0.55)");
+        const QString thumbHover = darkMode ? QStringLiteral("rgba(199, 210, 243, 0.84)") : QStringLiteral("rgba(75, 88, 119, 0.78)");
+
+        return QStringLiteral(R"JS((() => {
+    const root = document.documentElement;
+    if (!root) return;
+
+    const styleId = '__ghost_overlay_scrollbars';
+    let style = document.getElementById(styleId);
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+
+    style.textContent = `
+        html, body {
+            overflow: overlay !important;
+            scrollbar-gutter: auto !important;
+        }
+        html {
+            --ghost-scrollbar-size: 12px;
+            --ghost-scrollbar-thumb-inset: 3px;
+            --ghost-scrollbar-thumb: %1;
+            --ghost-scrollbar-thumb-hover: %2;
+        }
+        html.ghost-scrollbar-hover {
+            --ghost-scrollbar-thumb-inset: 1px;
+        }
+        ::-webkit-scrollbar {
+            width: var(--ghost-scrollbar-size);
+            height: var(--ghost-scrollbar-size);
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+            margin: 4px 0;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: var(--ghost-scrollbar-thumb);
+            border-radius: 999px;
+            border: var(--ghost-scrollbar-thumb-inset) solid transparent;
+            background-clip: padding-box;
+            min-height: 36px;
+            transition: border 140ms ease, background-color 140ms ease;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--ghost-scrollbar-thumb-hover);
+            background-clip: padding-box;
+        }
+        ::-webkit-scrollbar-corner {
+            background: transparent;
+        }
+    `;
+
+    if (!window.__ghostScrollbarHoverBound) {
+        const setHoverState = (event) => {
+            const edgeThreshold = 28;
+            const nearRight = window.innerWidth - event.clientX <= edgeThreshold;
+            const nearBottom = window.innerHeight - event.clientY <= edgeThreshold;
+            root.classList.toggle('ghost-scrollbar-hover', nearRight || nearBottom);
+        };
+
+        window.addEventListener('mousemove', setHoverState, { passive: true });
+        window.addEventListener('mouseleave', () => {
+            root.classList.remove('ghost-scrollbar-hover');
+        }, { passive: true });
+        window.__ghostScrollbarHoverBound = true;
+    }
+})();)JS").arg(thumb, thumbHover);
+}
+
+QString accessibilityScriptSource(bool highContrast, bool darkMode)
+{
+    return QStringLiteral(R"JS((() => {
+    const root = document.documentElement;
+    if (!root) return;
+
+    const styleId = '__ghost_accessibility_overrides';
+    let style = document.getElementById(styleId);
+    if (!style) {
+        style = document.createElement('style');
+        style.id = styleId;
+        document.head.appendChild(style);
+    }
+
+    root.classList.toggle('ghost-high-contrast', %1);
+
+    style.textContent = `
+        html.ghost-high-contrast {
+            color-scheme: %2;
+            filter: contrast(%3) saturate(%4) brightness(%5);
+        }
+        html.ghost-high-contrast * {
+            text-shadow: none !important;
+            box-shadow: none !important;
+        }
+        html.ghost-high-contrast a {
+            text-decoration-thickness: 2px !important;
+            text-underline-offset: 0.18em !important;
+        }
+        html.ghost-high-contrast input,
+        html.ghost-high-contrast textarea,
+        html.ghost-high-contrast select,
+        html.ghost-high-contrast button,
+        html.ghost-high-contrast [role="button"],
+        html.ghost-high-contrast [tabindex] {
+            outline: 1px solid rgba(255, 196, 64, 0.35) !important;
+            outline-offset: 0 !important;
+        }
+        html.ghost-high-contrast *:focus-visible {
+            outline: 3px solid rgba(255, 196, 64, 0.95) !important;
+            outline-offset: 2px !important;
+        }
+        html.ghost-high-contrast ::selection {
+            background: rgba(255, 196, 64, 0.35) !important;
+            color: inherit !important;
+        }
+    `;
+})();)JS")
+        .arg(highContrast ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(darkMode ? QStringLiteral("dark") : QStringLiteral("light"))
+        .arg(darkMode ? QStringLiteral("1.26") : QStringLiteral("1.18"))
+        .arg(darkMode ? QStringLiteral("0.82") : QStringLiteral("0.9"))
+        .arg(darkMode ? QStringLiteral("1.04") : QStringLiteral("1.02"));
+}
+
+QString displayUrlForUi(const QUrl &url)
+{
+    if (!url.isValid())
+        return QStringLiteral("Ready");
+
+    if (url.scheme() == QLatin1String("qrc")) {
+        if (url.path() == QLatin1String("/pages/newtab.html"))
+            return QStringLiteral("ghost://newtab");
+        if (url.path() == QLatin1String("/pages/settings.html"))
+            return QStringLiteral("ghost://settings");
+        if (url.path() == QLatin1String("/pages/codec-test.html"))
+            return QStringLiteral("ghost://codec-test");
+    }
+
+    return url.toString();
+}
+
+bool isInternalGhostPage(const QUrl &url)
+{
+    return url.scheme() == QLatin1String("qrc")
+        && url.path().startsWith(QLatin1String("/pages/"));
+}
+
+QString statusStateForUrl(const QUrl &url)
+{
+    if (!url.isValid())
+        return QStringLiteral("Idle");
+    if (isInternalGhostPage(url))
+        return QStringLiteral("Internal Page");
+    if (url.scheme() == QLatin1String("https"))
+        return QStringLiteral("Secure");
+    if (url.scheme() == QLatin1String("http"))
+        return QStringLiteral("Insecure");
+
+    return url.scheme().isEmpty()
+        ? QStringLiteral("Idle")
+        : url.scheme().toUpper();
+}
+
+}
+
 // ── Construction ──────────────────────────────────────────────
 
 MainWindow::MainWindow(QWidget *parent)
@@ -60,13 +281,15 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1280, 800);
     m_settings = new SettingsManager(this);
     m_history  = new HistoryManager(this);
+    m_protectionDiagnostics = new ProtectionDiagnostics(this);
+    m_weatherService = new WeatherService(this);
     m_profile = new QWebEngineProfile(QStringLiteral("Ghost"), this);
-    m_requestInterceptor = new GhostRequestInterceptor(m_settings, this);
+    m_requestInterceptor = new GhostRequestInterceptor(m_settings, m_protectionDiagnostics, this);
     connect(m_settings, &SettingsManager::settingsChanged,
             m_requestInterceptor, &GhostRequestInterceptor::refreshSettings);
     configureProfile();
     m_profile->setUrlRequestInterceptor(m_requestInterceptor);
-    m_cookies = new CookieManager(m_profile->cookieStore(), this);
+    m_cookies = new CookieManager(m_profile->cookieStore(), m_profile->persistentStoragePath(), this);
     connect(m_profile, &QWebEngineProfile::downloadRequested,
             this, &MainWindow::handleDownloadRequested);
 
@@ -79,11 +302,12 @@ MainWindow::MainWindow(QWidget *parent)
     buildNavBar();
     buildBookmarksBar();
     buildContentArea();
+    buildStatusBar();
 
     root->addWidget(m_titleBar);
     root->addWidget(m_navBar);
     root->addWidget(m_bookmarksBar);
-    root->addWidget(m_pageStack, 1);
+    root->addWidget(m_contentArea, 1);
 
     setCentralWidget(central);
     trackMouseForResize(this);
@@ -93,11 +317,13 @@ MainWindow::MainWindow(QWidget *parent)
     trackMouseForResize(m_navBar);
     trackMouseForResize(m_bookmarksBar);
     trackMouseForResize(m_urlBar);
+    trackMouseForResize(m_contentArea);
     trackMouseForResize(m_pageStack);
 
     connect(m_settings, &SettingsManager::settingsChanged, this, [this](const QString &) {
         applyAppearanceSettings();
         applyContentSettings();
+        applyProtectionSettings();
         applyPrivacySettings();
         applyDownloadSettings();
         applySystemSettings();
@@ -122,10 +348,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     applyAppearanceSettings();
     applyContentSettings();
+    applyProtectionSettings();
     applyPrivacySettings();
     applyDownloadSettings();
     applySystemSettings();
     applyStyles();
+    restoreWindowPlacement();
 
     auto *tabStateTimer = new QTimer(this);
     tabStateTimer->setInterval(750);
@@ -142,6 +370,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (!restoreSessionState())
         addTab(startupPageUrl());
+
+    applyAppearanceSettings();
+    refreshStatusBar();
 }
 
 MainWindow::~MainWindow() = default;
@@ -307,12 +538,54 @@ void MainWindow::buildBookmarksBar()
     layout->addStretch(1);
 }
 
+void MainWindow::buildStatusBar()
+{
+    m_statusBar = new QWidget(m_contentArea);
+    m_statusBar->setObjectName("statusBar");
+    m_statusBar->setFixedHeight(28);
+    m_statusBar->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_statusBar->setAttribute(Qt::WA_StyledBackground, true);
+    m_statusBar->setAutoFillBackground(false);
+
+    m_statusOverlayBackdrop = new QWidget(m_statusBar);
+    m_statusOverlayBackdrop->setObjectName(QStringLiteral("statusOverlayBackdrop"));
+    m_statusOverlayBackdrop->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    m_statusOverlayBackdrop->lower();
+
+    auto *layout = new QHBoxLayout(m_statusBar);
+    layout->setContentsMargins(12, 4, 12, 4);
+    layout->setSpacing(8);
+
+    m_statusLabel = new QLabel(QStringLiteral("Ready"), m_statusBar);
+    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
+    m_statusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+
+    m_statusStateLabel = new QLabel(QStringLiteral("Idle"), m_statusBar);
+    m_statusStateLabel->setObjectName(QStringLiteral("statusStateLabel"));
+    m_statusStateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+
+    layout->addWidget(m_statusLabel, 1);
+    layout->addWidget(m_statusStateLabel);
+
+    m_statusBar->raise();
+    updateStatusOverlayGeometry();
+}
+
 // ── Content ───────────────────────────────────────────────────
 
 void MainWindow::buildContentArea()
 {
-    m_pageStack = new QStackedWidget(this);
+    m_contentArea = new QWidget(this);
+    m_contentArea->setObjectName("contentArea");
+
+    auto *layout = new QVBoxLayout(m_contentArea);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    m_pageStack = new QStackedWidget(m_contentArea);
     m_pageStack->setObjectName("pageStack");
+    layout->addWidget(m_pageStack, 1);
 }
 
 void MainWindow::addTab(const QUrl &url, const QString &label)
@@ -328,19 +601,36 @@ void MainWindow::addTab(const QUrl &url, const QString &label)
         m_urlBar->clear();
     else
         m_urlBar->setText(url.toString());
+
+    m_hoveredLink.clear();
+    refreshStatusBar();
+    ensureStatusOverlayOnTop();
 }
 
 // ── Styles ────────────────────────────────────────────────────
 
 void MainWindow::applyStyles()
 {
-    const QString background = m_darkMode ? QStringLiteral("#1E1E2E") : QStringLiteral("#F3F5F9");
-    const QString surface = m_darkMode ? QStringLiteral("#2A2A3C") : QStringLiteral("#FFFFFF");
-    const QString surfaceHover = m_darkMode ? QStringLiteral("#333346") : QStringLiteral("#E8ECF5");
-    const QString textPrimary = m_darkMode ? QStringLiteral("#E0E0E0") : QStringLiteral("#1F2430");
-    const QString textMuted = m_darkMode ? QStringLiteral("#AAA") : QStringLiteral("#5E6573");
-    const QString border = m_darkMode ? QStringLiteral("#3A3A4A") : QStringLiteral("#D9DFEA");
-    const QString accent = QStringLiteral("#5B5FC7");
+    const bool highContrast = m_settings && m_settings->value(QStringLiteral("accessibility.highContrast")).toBool();
+    const QString background = m_darkMode
+        ? (highContrast ? QStringLiteral("#101217") : QStringLiteral("#1E1E2E"))
+        : (highContrast ? QStringLiteral("#FFFFFF") : QStringLiteral("#F3F5F9"));
+    const QString surface = m_darkMode
+        ? (highContrast ? QStringLiteral("#000000") : QStringLiteral("#2A2A3C"))
+        : (highContrast ? QStringLiteral("#FFFFFF") : QStringLiteral("#FFFFFF"));
+    const QString surfaceHover = m_darkMode
+        ? (highContrast ? QStringLiteral("#1B1F27") : QStringLiteral("#333346"))
+        : (highContrast ? QStringLiteral("#F2F6FF") : QStringLiteral("#E8ECF5"));
+    const QString textPrimary = m_darkMode
+        ? (highContrast ? QStringLiteral("#FFFFFF") : QStringLiteral("#E0E0E0"))
+        : (highContrast ? QStringLiteral("#0A0C10") : QStringLiteral("#1F2430"));
+    const QString textMuted = m_darkMode
+        ? (highContrast ? QStringLiteral("#E6EAF4") : QStringLiteral("#AAA"))
+        : (highContrast ? QStringLiteral("#1E2430") : QStringLiteral("#5E6573"));
+    const QString border = m_darkMode
+        ? (highContrast ? QStringLiteral("#F4F7FF") : QStringLiteral("#3A3A4A"))
+        : (highContrast ? QStringLiteral("#212734") : QStringLiteral("#D9DFEA"));
+    const QString accent = highContrast ? QStringLiteral("#FFC440") : QStringLiteral("#5B5FC7");
 
     setStyleSheet(QStringLiteral(R"(
         #titleBar {
@@ -443,6 +733,26 @@ void MainWindow::applyStyles()
         #pageStack {
             background: %1;
         }
+        #statusBar {
+            background: transparent;
+        }
+        #statusOverlayBackdrop {
+            border-radius: 10px;
+        }
+        #statusLabel {
+            color: %3;
+            font-size: 11px;
+            padding-right: 8px;
+            background: transparent;
+        }
+        #statusStateLabel {
+            color: %4;
+            font-size: 11px;
+            font-weight: 600;
+            padding-left: 8px;
+            border-left: 1px solid %8;
+            background: transparent;
+        }
         #mainMenu {
             background: %2;
             color: %4;
@@ -461,7 +771,15 @@ void MainWindow::applyStyles()
             background: %8;
             margin: 4px 8px;
         }
-    )").arg(background, surface, textMuted, textPrimary, accent, surfaceHover, iconPath(QStringLiteral("x")), border));
+    )")
+        .arg(background)
+        .arg(surface)
+        .arg(textMuted)
+        .arg(textPrimary)
+        .arg(accent)
+        .arg(surfaceHover)
+        .arg(iconPath(QStringLiteral("x")))
+        .arg(border));
 }
 
 void MainWindow::applyAppearanceSettings()
@@ -481,12 +799,82 @@ void MainWindow::applyAppearanceSettings()
     refreshIcons();
     applyStyles();
 
+    if (m_statusBar && m_statusOverlayBackdrop) {
+        QString mode = m_settings->value(QStringLiteral("appearance.statusOverlayMode")).toString().trimmed();
+        if (mode.isEmpty())
+            mode = QStringLiteral("frosted");
+        const int configuredOpacity = m_settings->value(QStringLiteral("appearance.statusOverlayOpacity")).toInt();
+        const int opacity = qBound(0, configuredOpacity, 100);
+        const bool isOff = mode == QLatin1String("off");
+        m_statusBar->setVisible(!isOff);
+
+        QColor fillColor = m_darkMode ? QColor(20, 25, 39) : QColor(255, 255, 255);
+        QColor borderColor = m_darkMode ? QColor(156, 170, 211) : QColor(175, 184, 203);
+        QString backdropStyle;
+        auto *shadow = qobject_cast<QGraphicsDropShadowEffect *>(m_statusOverlayBackdrop->graphicsEffect());
+        if (!shadow) {
+            shadow = new QGraphicsDropShadowEffect(m_statusOverlayBackdrop);
+            m_statusOverlayBackdrop->setGraphicsEffect(shadow);
+        }
+
+        if (mode == QLatin1String("transparent")) {
+            fillColor.setAlphaF(opacity / 100.0);
+            borderColor.setAlpha(0);
+            backdropStyle = QStringLiteral(
+                "background: %1; border: none; border-radius: 10px;")
+                                .arg(fillColor.name(QColor::HexArgb));
+            shadow->setEnabled(false);
+        } else if (mode == QLatin1String("solid")) {
+            fillColor.setAlpha(255);
+            borderColor.setAlphaF(0.45);
+            backdropStyle = QStringLiteral(
+                "background: %1; border: 1px solid %2; border-radius: 10px;")
+                                .arg(fillColor.name(QColor::HexArgb), borderColor.name(QColor::HexArgb));
+            shadow->setEnabled(false);
+        } else {
+            // Frosted is tuned per theme so light mode stays airy while dark mode reads denser.
+            const QColor topTint = m_darkMode
+                ? QColor(214, 225, 248, qBound(22, opacity / 2 + 18, 54))
+                : QColor(255, 255, 255, qBound(138, opacity + 92, 210));
+            const QColor midTint = m_darkMode
+                ? QColor(42, 52, 80, qBound(156, opacity * 2 + 72, 220))
+                : QColor(244, 248, 255, qBound(170, opacity * 2 + 92, 234));
+            const QColor bottomTint = m_darkMode
+                ? QColor(14, 18, 30, qBound(184, opacity * 2 + 104, 236))
+                : QColor(233, 240, 251, qBound(178, opacity * 2 + 108, 242));
+            backdropStyle = QStringLiteral(
+                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
+                "stop:0 %1, stop:0.42 %2, stop:1 %3); "
+                "border: none; border-radius: 10px;")
+                                .arg(topTint.name(QColor::HexArgb),
+                                     midTint.name(QColor::HexArgb),
+                                     bottomTint.name(QColor::HexArgb));
+            shadow->setBlurRadius(m_darkMode ? 34.0 : 26.0);
+            shadow->setOffset(0.0, m_darkMode ? 6.0 : 4.0);
+            shadow->setColor(QColor(0, 0, 0, m_darkMode ? 132 : 52));
+            shadow->setEnabled(true);
+        }
+
+        if (opacity == 0 && mode != QLatin1String("solid")) {
+            fillColor.setAlpha(0);
+            borderColor.setAlpha(0);
+            backdropStyle = QStringLiteral("background: transparent; border: none; border-radius: 10px;");
+            shadow->setEnabled(false);
+        }
+
+        m_statusOverlayBackdrop->setStyleSheet(backdropStyle);
+        updateStatusOverlayGeometry();
+        m_statusBar->raise();
+    }
+
     for (int i = 0; i < m_pageStack->count(); ++i) {
         if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
             applyViewSettings(view);
             refreshTabPresentation(view);
         }
     }
+
+    refreshStatusBar();
 }
 
 void MainWindow::applyContentSettings()
@@ -495,6 +883,28 @@ void MainWindow::applyContentSettings()
         if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
             applyViewSettings(view);
             applyPerViewContentRules(view);
+        }
+    }
+}
+
+void MainWindow::applyProtectionSettings()
+{
+    if (!m_profile || !m_settings)
+        return;
+
+    const bool blockFingerprinting = m_settings->value(QStringLiteral("protection.blockFingerprinting")).toBool();
+    setFingerprintingProtectionEnabled(m_profile, blockFingerprinting);
+
+    if (!blockFingerprinting)
+        return;
+
+    const QString scriptSource = fingerprintingProtectionScriptSource();
+    for (int i = 0; i < m_pageStack->count(); ++i) {
+        if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
+            if (!view->page())
+                continue;
+
+            view->page()->runJavaScript(scriptSource);
         }
     }
 }
@@ -526,6 +936,15 @@ void MainWindow::applyDownloadSettings()
 
 void MainWindow::applySystemSettings()
 {
+    const QString proxyMode = m_settings->value(QStringLiteral("system.proxyMode")).toString().trimmed();
+    if (proxyMode == QLatin1String("none")) {
+        QNetworkProxyFactory::setUseSystemConfiguration(false);
+        QNetworkProxy::setApplicationProxy(QNetworkProxy(QNetworkProxy::NoProxy));
+    } else {
+        QNetworkProxyFactory::setUseSystemConfiguration(true);
+        QNetworkProxy::setApplicationProxy(QNetworkProxy());
+    }
+
     for (int i = 0; i < m_pageStack->count(); ++i) {
         if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i)))
             applyViewSettings(view);
@@ -561,7 +980,12 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     const bool fullScreenEnabled = m_settings->value(QStringLiteral("content.fullScreenVideo")).toBool();
     const bool javascriptEnabled = siteSettingValue(QStringLiteral("content.siteSettings.javascript"), QStringLiteral("allow")) != QLatin1String("block");
     const bool popupsEnabled = siteSettingValue(QStringLiteral("content.siteSettings.popups"), QStringLiteral("block")) == QLatin1String("allow");
-    const QColor backgroundColor = m_darkMode ? QColor(0x1E, 0x1E, 0x2E) : QColor(0xF3, 0xF5, 0xF9);
+    const bool highContrast = m_settings->value(QStringLiteral("accessibility.highContrast")).toBool();
+    const QColor backgroundColor = isInternalGhostPage(view->url())
+        ? (m_darkMode
+            ? (highContrast ? QColor(0x08, 0x0A, 0x10) : QColor(0x1E, 0x1E, 0x2E))
+            : (highContrast ? QColor(0xFF, 0xFF, 0xFF) : QColor(0xF3, 0xF5, 0xF9)))
+        : QColor(Qt::white);
 
     view->settings()->setFontSize(QWebEngineSettings::DefaultFontSize, fontSize > 0 ? fontSize : 16);
     view->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, !autoplayEnabled);
@@ -571,11 +995,64 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     view->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
     view->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, javascriptEnabled);
     view->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, popupsEnabled);
+    view->settings()->setAttribute(QWebEngineSettings::LinksIncludedInFocusChain, true);
     const bool hwAccel = m_settings->value(QStringLiteral("system.hardwareAcceleration")).toBool();
     view->settings()->setAttribute(QWebEngineSettings::WebGLEnabled, hwAccel);
     view->settings()->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled, hwAccel);
     view->setZoomFactor((zoomLevel > 0 ? zoomLevel : 100) / 100.0);
     view->page()->setBackgroundColor(backgroundColor);
+    view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode));
+    view->page()->runJavaScript(accessibilityScriptSource(highContrast, m_darkMode));
+}
+
+void MainWindow::refreshStatusBar()
+{
+    if (!m_statusLabel || !m_statusStateLabel)
+        return;
+
+    const QWebEngineView *view = currentWebView();
+    const QUrl currentUrl = view ? view->url() : QUrl();
+
+    m_statusLabel->setText(m_hoveredLink.isEmpty() ? displayUrlForUi(currentUrl) : m_hoveredLink);
+    m_statusStateLabel->setText(statusStateForUrl(currentUrl));
+    updateStatusOverlayGeometry();
+    ensureStatusOverlayOnTop();
+}
+
+void MainWindow::ensureStatusOverlayOnTop()
+{
+    if (!m_statusBar || !m_statusBar->isVisible())
+        return;
+
+    m_statusBar->raise();
+    QTimer::singleShot(0, this, [this]() {
+        if (m_statusBar && m_statusBar->isVisible())
+            m_statusBar->raise();
+    });
+}
+
+void MainWindow::updateStatusOverlayGeometry()
+{
+    if (!m_contentArea || !m_pageStack || !m_statusBar || !m_statusOverlayBackdrop)
+        return;
+
+    if (!m_statusBar->isVisible())
+        return;
+
+    constexpr int leftInset = 10;
+    constexpr int rightInset = 30;
+    constexpr int bottomInset = 1;
+    constexpr int overlayHeight = 28;
+    const QRect stackRect = m_pageStack->geometry();
+    const int overlayWidth = qMax(220, stackRect.width() - leftInset - rightInset);
+    const QRect overlayRect(stackRect.x() + leftInset,
+                            qMax(stackRect.y(), stackRect.bottom() - overlayHeight - bottomInset + 1),
+                            overlayWidth,
+                            overlayHeight);
+    m_statusBar->setGeometry(overlayRect);
+    m_statusOverlayBackdrop->setGeometry(m_statusBar->rect());
+    m_statusOverlayBackdrop->lower();
+    ensureStatusOverlayOnTop();
 }
 
 void MainWindow::applyPerViewContentRules(QWebEngineView *view)
@@ -642,6 +1119,9 @@ void MainWindow::closeTab(int index)
     m_pageStack->removeWidget(widget);
     widget->deleteLater();
     saveSessionState();
+    m_hoveredLink.clear();
+    refreshStatusBar();
+    ensureStatusOverlayOnTop();
 }
 
 void MainWindow::switchTab(int index)
@@ -658,6 +1138,9 @@ void MainWindow::switchTab(int index)
             m_urlBar->setText(url.toString());
     }
 
+    m_hoveredLink.clear();
+    refreshStatusBar();
+    ensureStatusOverlayOnTop();
     saveSessionState();
 }
 
@@ -792,6 +1275,8 @@ void MainWindow::onMaximizeRestore()
         m_maximizeBtn->setIcon(QIcon(iconPath("restore")));
         m_maximizeBtn->setToolTip("Restore");
     }
+
+    saveWindowPlacement();
 }
 
 void MainWindow::onClose()
@@ -803,6 +1288,10 @@ void MainWindow::onClose()
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
+    if ((obj == m_pageStack || obj == m_contentArea) && event->type() == QEvent::Resize) {
+        updateStatusOverlayGeometry();
+    }
+
 #ifndef Q_OS_WIN
     if (!isMaximized() && !isFullScreen()) {
         switch (event->type()) {
@@ -869,11 +1358,41 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
     return QMainWindow::eventFilter(obj, event);
 }
 
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+
+    if (event->type() == QEvent::WindowStateChange) {
+        refreshIcons();
+        if (!m_restoringWindowPlacement)
+            saveWindowPlacement();
+    }
+}
+
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    saveWindowPlacement();
     saveSessionState();
     clearBrowsingDataIfNeeded();
     QMainWindow::closeEvent(event);
+}
+
+void MainWindow::moveEvent(QMoveEvent *event)
+{
+    QMainWindow::moveEvent(event);
+
+    if (!m_restoringWindowPlacement && !isMaximized() && !isMinimized())
+        saveWindowPlacement();
+}
+
+void MainWindow::resizeEvent(QResizeEvent *event)
+{
+    QMainWindow::resizeEvent(event);
+
+    updateStatusOverlayGeometry();
+
+    if (!m_restoringWindowPlacement && !isMaximized() && !isMinimized())
+        saveWindowPlacement();
 }
 
 #ifdef Q_OS_WIN
@@ -955,7 +1474,7 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
     applyViewSettings(view);
     trackMouseForResize(view);
 
-    if (isSettingsUrl(url))
+    if (isSettingsUrl(url) || url.path() == QLatin1String("/pages/newtab.html"))
         attachSettingsBridge(view);
 
     view->setUrl(normalizedYouTubeUrl(url));
@@ -967,8 +1486,16 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
             return;
         }
 
+        if (isSettingsUrl(url) || url.path() == QLatin1String("/pages/newtab.html"))
+            attachSettingsBridge(view);
+
+        applyViewSettings(view);
         refreshTabPresentation(view);
         updateUrlBar(url);
+        if (m_pageStack->currentWidget() == view) {
+            m_hoveredLink.clear();
+            refreshStatusBar();
+        }
         saveSessionState();
     });
     connect(view, &QWebEngineView::titleChanged,  this, &MainWindow::updateTabTitle);
@@ -985,10 +1512,29 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
     connect(page, &QWebEnginePage::audioMutedChanged, this, [this, view](bool) {
         refreshTabPresentation(view);
     });
+    connect(page, &QWebEnginePage::linkHovered, this, [this, view](const QString &link) {
+        if (m_pageStack->currentWidget() != view)
+            return;
+
+        m_hoveredLink = link.trimmed();
+        if (!m_hoveredLink.isEmpty()) {
+            const QUrl hoveredUrl(m_hoveredLink, QUrl::TolerantMode);
+            if (hoveredUrl.isValid())
+                m_hoveredLink = displayUrlForUi(hoveredUrl);
+        }
+
+        refreshStatusBar();
+    });
     connect(view, &QWebEngineView::loadFinished, this, [this, view](bool ok) {
         if (ok && view) {
+            view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode));
+            view->page()->runJavaScript(accessibilityScriptSource(
+                m_settings->value(QStringLiteral("accessibility.highContrast")).toBool(),
+                m_darkMode));
             refreshTabPresentation(view);
             m_history->recordVisit(view->url(), view->title());
+            if (m_pageStack->currentWidget() == view)
+                refreshStatusBar();
         }
     });
 
@@ -1090,6 +1636,8 @@ void MainWindow::attachSettingsBridge(QWebEngineView *view)
     channel->registerObject(QStringLiteral("ghostSettings"), m_settings);
     channel->registerObject(QStringLiteral("ghostHistory"), m_history);
     channel->registerObject(QStringLiteral("ghostCookies"), m_cookies);
+    channel->registerObject(QStringLiteral("ghostProtection"), m_protectionDiagnostics);
+    channel->registerObject(QStringLiteral("ghostWeather"), m_weatherService);
     view->page()->setWebChannel(channel);
 }
 
@@ -1136,6 +1684,17 @@ QString MainWindow::sessionStatePath() const
     QDir dir(configDir);
     dir.mkpath(QStringLiteral("."));
     return dir.filePath(QStringLiteral("session.json"));
+}
+
+QString MainWindow::windowPlacementPath() const
+{
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (configDir.isEmpty())
+        configDir = QCoreApplication::applicationDirPath();
+
+    QDir dir(configDir);
+    dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("window-state.json"));
 }
 
 void MainWindow::saveSessionState() const
@@ -1195,6 +1754,93 @@ bool MainWindow::restoreSessionState()
     }
 
     return true;
+}
+
+void MainWindow::saveWindowPlacement() const
+{
+    QRect savedGeometry = isMaximized() ? normalGeometry() : geometry();
+    if (!savedGeometry.isValid())
+        savedGeometry = geometry();
+
+    if (!savedGeometry.isValid())
+        return;
+
+    QJsonObject root {
+        { QStringLiteral("x"), savedGeometry.x() },
+        { QStringLiteral("y"), savedGeometry.y() },
+        { QStringLiteral("width"), savedGeometry.width() },
+        { QStringLiteral("height"), savedGeometry.height() },
+        { QStringLiteral("maximized"), isMaximized() },
+    };
+
+    QFile file(windowPlacementPath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+void MainWindow::restoreWindowPlacement()
+{
+    QFile file(windowPlacementPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject())
+        return;
+
+    const QJsonObject root = doc.object();
+    const QRect savedRect(
+        root.value(QStringLiteral("x")).toInt(x()),
+        root.value(QStringLiteral("y")).toInt(y()),
+        root.value(QStringLiteral("width")).toInt(width()),
+        root.value(QStringLiteral("height")).toInt(height()));
+
+    if (!savedRect.isValid() || savedRect.width() < 640 || savedRect.height() < 480)
+        return;
+
+    QRect boundedRect = savedRect;
+    const QList<QScreen *> screens = QGuiApplication::screens();
+    bool visibleOnAnyScreen = false;
+    for (QScreen *screen : screens) {
+        if (!screen)
+            continue;
+
+        const QRect available = screen->availableGeometry();
+        if (available.intersects(boundedRect.adjusted(32, 32, -32, -32))) {
+            visibleOnAnyScreen = true;
+            boundedRect.moveLeft(qMax(available.left(), boundedRect.left()));
+            boundedRect.moveTop(qMax(available.top(), boundedRect.top()));
+            boundedRect.setWidth(qMin(boundedRect.width(), available.width()));
+            boundedRect.setHeight(qMin(boundedRect.height(), available.height()));
+            break;
+        }
+    }
+
+    if (!visibleOnAnyScreen) {
+        if (QScreen *primaryScreen = QGuiApplication::primaryScreen()) {
+            const QRect available = primaryScreen->availableGeometry();
+            boundedRect.setWidth(qMin(boundedRect.width(), available.width()));
+            boundedRect.setHeight(qMin(boundedRect.height(), available.height()));
+            boundedRect.moveCenter(available.center());
+        }
+    }
+
+    m_restoringWindowPlacement = true;
+    setGeometry(boundedRect);
+
+    if (root.value(QStringLiteral("maximized")).toBool()) {
+        QTimer::singleShot(0, this, [this]() {
+            showMaximized();
+            refreshIcons();
+            m_restoringWindowPlacement = false;
+        });
+        return;
+    }
+
+    refreshIcons();
+    m_restoringWindowPlacement = false;
 }
 
 QUrl MainWindow::searchUrlForQuery(const QString &query) const
@@ -1282,45 +1928,169 @@ QString MainWindow::siteSettingValue(const QString &path, const QString &fallbac
     return value.isEmpty() ? fallback : value;
 }
 
+QString MainWindow::permissionPolicyForOrigin(const QString &permissionType, const QUrl &origin, const QString &defaultPolicy) const
+{
+    if (!m_settings)
+        return defaultPolicy;
+
+    const QString perSitePolicy = m_settings->sitePermissionRule(permissionType, origin).trimmed().toLower();
+    if (!perSitePolicy.isEmpty())
+        return perSitePolicy;
+
+    return defaultPolicy;
+}
+
+QWebEnginePage::PermissionPolicy MainWindow::promptForPermissionDecision(const QUrl &origin,
+                                                                         const QStringList &permissionTypes,
+                                                                         bool *rememberChoice)
+{
+    if (rememberChoice)
+        *rememberChoice = false;
+
+    QMessageBox prompt(this);
+    prompt.setWindowTitle(QStringLiteral("Site Permission Request"));
+    prompt.setIcon(QMessageBox::Question);
+    prompt.setText(QStringLiteral("%1 wants access to %2.")
+        .arg(origin.host().isEmpty() ? origin.toString() : origin.host(), joinPermissionLabels(permissionTypes)));
+    prompt.setInformativeText(QStringLiteral("Choose whether to allow or block this request."));
+
+    QPushButton *allowButton = prompt.addButton(QStringLiteral("Allow"), QMessageBox::AcceptRole);
+    QPushButton *blockButton = prompt.addButton(QStringLiteral("Block"), QMessageBox::DestructiveRole);
+    QPushButton *askButton = prompt.addButton(QStringLiteral("Ask Later"), QMessageBox::RejectRole);
+
+    QCheckBox rememberCheckBox(QStringLiteral("Remember this decision for this site"), &prompt);
+    prompt.setCheckBox(&rememberCheckBox);
+    prompt.exec();
+
+    if (rememberChoice)
+        *rememberChoice = rememberCheckBox.isChecked();
+
+    if (qobject_cast<QPushButton *>(prompt.clickedButton()) == allowButton)
+        return QWebEnginePage::PermissionGrantedByUser;
+    if (qobject_cast<QPushButton *>(prompt.clickedButton()) == blockButton)
+        return QWebEnginePage::PermissionDeniedByUser;
+    Q_UNUSED(askButton);
+    return QWebEnginePage::PermissionUnknown;
+}
+
 void MainWindow::applyFeaturePermission(QWebEnginePage *page, const QUrl &origin, QWebEnginePage::Feature feature)
 {
     if (!page)
         return;
 
-    auto policyFor = [](const QString &value) {
-        if (value == QLatin1String("allow"))
-            return QWebEnginePage::PermissionGrantedByUser;
-        if (value == QLatin1String("block"))
-            return QWebEnginePage::PermissionDeniedByUser;
-        return QWebEnginePage::PermissionUnknown;
-    };
-
     switch (feature) {
-    case QWebEnginePage::Notifications:
-        page->setFeaturePermission(origin, feature,
-            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.notifications"), QStringLiteral("ask"))));
+    case QWebEnginePage::Notifications: {
+        const QString policy = permissionPolicyForOrigin(
+            QStringLiteral("notifications"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.notifications"), QStringLiteral("ask")));
+        QWebEnginePage::PermissionPolicy permission = policyForValue(policy);
+        if (permission == QWebEnginePage::PermissionUnknown) {
+            m_settings->rememberSitePermissionRequest(QStringLiteral("notifications"), origin);
+            bool rememberChoice = false;
+            permission = promptForPermissionDecision(origin, { QStringLiteral("notifications") }, &rememberChoice);
+            if (rememberChoice && permission != QWebEnginePage::PermissionUnknown) {
+                m_settings->upsertSitePermissionRule(
+                    QStringLiteral("notifications"),
+                    origin.toString(),
+                    permission == QWebEnginePage::PermissionGrantedByUser ? QStringLiteral("allow") : QStringLiteral("block"));
+            }
+        }
+        page->setFeaturePermission(origin, feature, permission);
         break;
-    case QWebEnginePage::Geolocation:
-        page->setFeaturePermission(origin, feature,
-            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.location"), QStringLiteral("ask"))));
+    }
+    case QWebEnginePage::Geolocation: {
+        const QString policy = permissionPolicyForOrigin(
+            QStringLiteral("location"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.location"), QStringLiteral("ask")));
+        QWebEnginePage::PermissionPolicy permission = policyForValue(policy);
+        if (permission == QWebEnginePage::PermissionUnknown) {
+            m_settings->rememberSitePermissionRequest(QStringLiteral("location"), origin);
+            bool rememberChoice = false;
+            permission = promptForPermissionDecision(origin, { QStringLiteral("location") }, &rememberChoice);
+            if (rememberChoice && permission != QWebEnginePage::PermissionUnknown) {
+                m_settings->upsertSitePermissionRule(
+                    QStringLiteral("location"),
+                    origin.toString(),
+                    permission == QWebEnginePage::PermissionGrantedByUser ? QStringLiteral("allow") : QStringLiteral("block"));
+            }
+        }
+        page->setFeaturePermission(origin, feature, permission);
         break;
-    case QWebEnginePage::MediaAudioCapture:
-        page->setFeaturePermission(origin, feature,
-            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask"))));
+    }
+    case QWebEnginePage::MediaAudioCapture: {
+        const QString policy = permissionPolicyForOrigin(
+            QStringLiteral("microphone"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask")));
+        QWebEnginePage::PermissionPolicy permission = policyForValue(policy);
+        if (permission == QWebEnginePage::PermissionUnknown) {
+            m_settings->rememberSitePermissionRequest(QStringLiteral("microphone"), origin);
+            bool rememberChoice = false;
+            permission = promptForPermissionDecision(origin, { QStringLiteral("microphone") }, &rememberChoice);
+            if (rememberChoice && permission != QWebEnginePage::PermissionUnknown) {
+                m_settings->upsertSitePermissionRule(
+                    QStringLiteral("microphone"),
+                    origin.toString(),
+                    permission == QWebEnginePage::PermissionGrantedByUser ? QStringLiteral("allow") : QStringLiteral("block"));
+            }
+        }
+        page->setFeaturePermission(origin, feature, permission);
         break;
-    case QWebEnginePage::MediaVideoCapture:
-        page->setFeaturePermission(origin, feature,
-            policyFor(siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask"))));
+    }
+    case QWebEnginePage::MediaVideoCapture: {
+        const QString policy = permissionPolicyForOrigin(
+            QStringLiteral("camera"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask")));
+        QWebEnginePage::PermissionPolicy permission = policyForValue(policy);
+        if (permission == QWebEnginePage::PermissionUnknown) {
+            m_settings->rememberSitePermissionRequest(QStringLiteral("camera"), origin);
+            bool rememberChoice = false;
+            permission = promptForPermissionDecision(origin, { QStringLiteral("camera") }, &rememberChoice);
+            if (rememberChoice && permission != QWebEnginePage::PermissionUnknown) {
+                m_settings->upsertSitePermissionRule(
+                    QStringLiteral("camera"),
+                    origin.toString(),
+                    permission == QWebEnginePage::PermissionGrantedByUser ? QStringLiteral("allow") : QStringLiteral("block"));
+            }
+        }
+        page->setFeaturePermission(origin, feature, permission);
         break;
+    }
     case QWebEnginePage::MediaAudioVideoCapture: {
-        const QString cameraPolicy = siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask"));
-        const QString microphonePolicy = siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask"));
-        const QString combinedPolicy = (cameraPolicy == QLatin1String("block") || microphonePolicy == QLatin1String("block"))
-            ? QStringLiteral("block")
-            : (cameraPolicy == QLatin1String("allow") && microphonePolicy == QLatin1String("allow"))
-                ? QStringLiteral("allow")
-                : QStringLiteral("ask");
-        page->setFeaturePermission(origin, feature, policyFor(combinedPolicy));
+        const QString cameraPolicy = permissionPolicyForOrigin(
+            QStringLiteral("camera"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.camera"), QStringLiteral("ask")));
+        const QString microphonePolicy = permissionPolicyForOrigin(
+            QStringLiteral("microphone"),
+            origin,
+            siteSettingValue(QStringLiteral("content.siteSettings.microphone"), QStringLiteral("ask")));
+
+        QWebEnginePage::PermissionPolicy permission = QWebEnginePage::PermissionUnknown;
+        if (cameraPolicy == QLatin1String("block") || microphonePolicy == QLatin1String("block")) {
+            permission = QWebEnginePage::PermissionDeniedByUser;
+        } else if (cameraPolicy == QLatin1String("allow") && microphonePolicy == QLatin1String("allow")) {
+            permission = QWebEnginePage::PermissionGrantedByUser;
+        } else {
+            m_settings->rememberSitePermissionRequest(QStringLiteral("camera"), origin);
+            m_settings->rememberSitePermissionRequest(QStringLiteral("microphone"), origin);
+            bool rememberChoice = false;
+            permission = promptForPermissionDecision(origin,
+                { QStringLiteral("camera"), QStringLiteral("microphone") },
+                &rememberChoice);
+            if (rememberChoice && permission != QWebEnginePage::PermissionUnknown) {
+                const QString storedPolicy = permission == QWebEnginePage::PermissionGrantedByUser
+                    ? QStringLiteral("allow")
+                    : QStringLiteral("block");
+                m_settings->upsertSitePermissionRule(QStringLiteral("camera"), origin.toString(), storedPolicy);
+                m_settings->upsertSitePermissionRule(QStringLiteral("microphone"), origin.toString(), storedPolicy);
+            }
+        }
+
+        page->setFeaturePermission(origin, feature, permission);
         break;
     }
     default:

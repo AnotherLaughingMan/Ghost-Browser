@@ -7,8 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Protection diagnostics in `ghost://settings` now show recent blocked requests and HTTPS upgrades
+- Ghost dashboard now starts the news and weather work with a live weather card and briefing links on `ghost://newtab`
+
 ### Changed
 - Bumped Ghost Browser app version to `0.1.2`
+- `protection.blockFingerprinting` now applies concrete mitigations by standardizing client hints, hardware and WebGL identifiers, and disabling the Battery API on newly loaded pages
 
 ---
 

@@ -5,6 +5,7 @@
 #include <QNetworkCookie>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 
 #include <atomic>
 
@@ -15,7 +16,7 @@ class CookieManager : public QObject
     Q_OBJECT
 
 public:
-    explicit CookieManager(QWebEngineCookieStore *store, QObject *parent = nullptr);
+    explicit CookieManager(QWebEngineCookieStore *store, const QString &storagePath, QObject *parent = nullptr);
     void setBlockThirdPartyCookies(bool enabled);
 
     Q_INVOKABLE QString getCookiesJson() const;
@@ -32,10 +33,16 @@ private slots:
     void onCookieRemoved(const QNetworkCookie &cookie);
 
 private:
+    QList<QNetworkCookie> buildVisibleCookies() const;
+    QList<QNetworkCookie> loadCookiesFromDisk() const;
+    QStringList cookieDatabasePaths() const;
+    static QDateTime chromiumTimestampToUtc(qint64 microsecondsSince1601);
     void finishReload(int remainingRetries);
 
     QWebEngineCookieStore *m_store = nullptr;
+    QString m_storagePath;
     QList<QNetworkCookie> m_cookies;
+    mutable QList<QNetworkCookie> m_visibleCookies;
     bool m_loading = false;
     std::atomic_bool m_blockThirdPartyCookies = false;
 };

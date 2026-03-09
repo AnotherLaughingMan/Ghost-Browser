@@ -9,7 +9,9 @@
     "theme": "dark",
     "showBookmarksBar": false,
     "fontSize": 16,
-    "zoomLevel": 100
+    "zoomLevel": 100,
+    "statusOverlayMode": "frosted",
+    "statusOverlayOpacity": 42
   },
   "content": {
     "autoplay": true,

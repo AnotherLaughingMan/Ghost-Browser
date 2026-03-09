@@ -284,6 +284,171 @@
   .action-btn.danger:hover {
     border-color: #E81123;
   }
+  .protection-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .protection-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 220px;
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .protection-filter-input {
+    width: 100%;
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .protection-filter-input:focus {
+    outline: none;
+    border-color: #5B5FC7;
+  }
+  .protection-stat {
+    background: #262638;
+    border: 1px solid #2F3147;
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .protection-stat .stat-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .protection-stat .stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: #EAEAF6;
+    margin-top: 6px;
+  }
+  .protection-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .protection-empty {
+    background: #262638;
+    border-radius: 10px;
+    padding: 18px 16px;
+    color: #8A8CA8;
+    font-size: 13px;
+  }
+  .protection-entry {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 12px;
+    align-items: start;
+    background: #262638;
+    border: 1px solid #2F3147;
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .protection-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 76px;
+    height: 24px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.45px;
+  }
+  .protection-badge.blocked {
+    background: rgba(225, 90, 105, 0.18);
+    color: #FFB3BC;
+  }
+  .protection-badge.upgraded {
+    background: rgba(91, 95, 199, 0.2);
+    color: #B8BBFF;
+  }
+  .protection-entry .entry-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F0F1FF;
+  }
+  .protection-entry .entry-meta,
+  .protection-entry .entry-detail {
+    font-size: 12px;
+    color: #8D90AF;
+    margin-top: 3px;
+    word-break: break-word;
+  }
+  .protection-entry .entry-time {
+    font-size: 11px;
+    color: #7B7EA0;
+    white-space: nowrap;
+  }
+  .site-permission-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .site-permission-empty {
+    background: #262638;
+    border: 1px solid #2F3147;
+    border-radius: 10px;
+    padding: 16px;
+    color: #8D90AF;
+    font-size: 13px;
+  }
+  .site-permission-entry {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    background: #262638;
+    border: 1px solid #2F3147;
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .site-permission-entry .entry-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #F0F1FF;
+    word-break: break-word;
+  }
+  .site-permission-entry .entry-meta {
+    font-size: 12px;
+    color: #8D90AF;
+    margin-top: 3px;
+  }
+  .site-permission-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .site-permission-select {
+    min-width: 110px;
+  }
+  .site-permission-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 140px auto;
+    gap: 10px;
+    align-items: center;
+    margin-top: 12px;
+  }
+  .site-permission-input {
+    width: 100%;
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .site-permission-input:focus {
+    outline: none;
+    border-color: #5B5FC7;
+  }
 
   /* Scrollbar */
   ::-webkit-scrollbar { width: 8px; }
@@ -347,6 +512,58 @@
   body.light-theme .radio-label,
   body.light-theme h2 {
     color: #1F2430;
+  }
+  body.light-theme .protection-stat,
+  body.light-theme .protection-empty,
+  body.light-theme .protection-entry {
+    background: #FFFFFF;
+    border-color: #DCE2EE;
+  }
+  body.light-theme .protection-filter-input {
+    background: #FFFFFF;
+    color: #1F2430;
+    border-color: #D9DFEA;
+  }
+  body.light-theme .protection-stat .stat-label,
+  body.light-theme .protection-entry .entry-meta,
+  body.light-theme .protection-entry .entry-detail,
+  body.light-theme .protection-entry .entry-time,
+  body.light-theme .protection-empty {
+    color: #667089;
+  }
+  body.light-theme .protection-stat .stat-value,
+  body.light-theme .protection-entry .entry-title {
+    color: #1E2535;
+  }
+  body.light-theme .site-permission-empty,
+  body.light-theme .site-permission-entry {
+    background: #FFFFFF;
+    border-color: #DCE2EE;
+  }
+  body.light-theme .site-permission-entry .entry-title {
+    color: #1E2535;
+  }
+  body.light-theme .site-permission-entry .entry-meta {
+    color: #667089;
+  }
+  body.light-theme .site-permission-input {
+    background: #FFFFFF;
+    color: #1F2430;
+    border-color: #D9DFEA;
+  }
+  @media (max-width: 720px) {
+    .protection-toolbar {
+      grid-template-columns: 1fr;
+    }
+    .site-permission-form {
+      grid-template-columns: 1fr;
+    }
+    .site-permission-entry {
+      grid-template-columns: 1fr;
+    }
+    .site-permission-actions {
+      justify-content: flex-start;
+    }
   }
   body.light-theme .toggle {
     background: #C8CEDA;
@@ -816,6 +1033,37 @@
           </select>
         </div>
       </div>
+      <div class="section">
+        <div class="section-title">Status overlay</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Style</div>
+            <div class="sublabel">Choose whether the bottom status surface is hidden, clear, frosted, or solid</div>
+          </div>
+          <select class="setting-select" data-setting-path="appearance.statusOverlayMode">
+            <option value="off">Off</option>
+            <option value="transparent">Transparent overlay</option>
+            <option value="frosted" selected>Frosted overlay</option>
+            <option value="solid">Solid overlay</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Overlay opacity</div>
+            <div class="sublabel">Control the background transparency from invisible to fully opaque when the style supports it</div>
+          </div>
+          <select class="setting-select" data-setting-path="appearance.statusOverlayOpacity">
+            <option value="0">0%</option>
+            <option value="15">15%</option>
+            <option value="25">25%</option>
+            <option value="42" selected>42%</option>
+            <option value="55">55%</option>
+            <option value="70">70%</option>
+            <option value="85">85%</option>
+            <option value="100">100%</option>
+          </select>
+        </div>
+      </div>
     </div>
 
     <!-- CONTENT -->
@@ -877,11 +1125,8 @@
         </div>
         <div class="setting-row">
           <div>
-            <div class="label-line">
-              <div class="label">Block fingerprinting</div>
-              <span class="status-tag">Coming Soon</span>
-            </div>
-            <div class="sublabel">Prevent sites from identifying your device</div>
+            <div class="label">Block fingerprinting</div>
+            <div class="sublabel">Standardize client hints, hardware and WebGL identifiers, and disable the Battery API on newly loaded pages</div>
           </div>
           <div class="toggle on" data-setting-path="protection.blockFingerprinting"></div>
         </div>
@@ -891,6 +1136,41 @@
             <div class="sublabel">Block third-party scripts from loading</div>
           </div>
           <div class="toggle" data-setting-path="protection.blockScripts"></div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Diagnostics</div>
+        <div class="setting-row" style="border-radius: 8px; cursor: default;">
+          <div>
+            <div class="label">Recent protection activity</div>
+            <div class="sublabel">See the latest requests Ghost blocked or upgraded so the Protection page is explainable.</div>
+          </div>
+          <button class="action-btn" data-action="clearProtectionDiagnostics">Clear</button>
+        </div>
+        <div class="protection-toolbar">
+          <input class="protection-filter-input" id="protectionSiteFilter" type="text" placeholder="Filter by site or page...">
+          <select class="setting-select" id="protectionCategoryFilter">
+            <option value="all">All activity</option>
+            <option value="action:blocked">Blocked only</option>
+            <option value="action:upgraded">HTTPS upgrades only</option>
+          </select>
+        </div>
+        <div class="protection-summary" id="protectionSummary">
+          <div class="protection-stat">
+            <div class="stat-label">Blocked Requests</div>
+            <div class="stat-value">0</div>
+          </div>
+          <div class="protection-stat">
+            <div class="stat-label">HTTPS Upgrades</div>
+            <div class="stat-value">0</div>
+          </div>
+          <div class="protection-stat">
+            <div class="stat-label">Latest Category</div>
+            <div class="stat-value">None</div>
+          </div>
+        </div>
+        <div class="protection-list" id="protectionDiagnosticsList">
+          <div class="protection-empty">No protection activity recorded yet.</div>
         </div>
       </div>
     </div>
@@ -932,10 +1212,7 @@
         <div class="section-title">Security</div>
         <div class="setting-row" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label-line">
-              <div class="label">Safe Browsing</div>
-              <span class="status-tag">Coming Soon</span>
-            </div>
+            <div class="label">Safe Browsing</div>
             <div class="sublabel">Protect against dangerous sites and downloads</div>
           </div>
           <div class="toggle on" data-setting-path="protection.safeBrowsing"></div>
@@ -984,16 +1261,12 @@
             <option value="allow">Allow</option>
           </select>
         </div>
-        <div class="setting-row">
+        <div class="setting-row" data-open-section="site-settings-location">
           <div>
             <div class="label">Location</div>
-            <div class="sublabel">Default behavior when a site requests your location</div>
+            <div class="sublabel">Default behavior and per-site rules for location access</div>
           </div>
-          <select class="setting-select" data-setting-path="content.siteSettings.location">
-            <option value="ask" selected>Ask</option>
-            <option value="allow">Allow</option>
-            <option value="block">Block</option>
-          </select>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="setting-row" data-open-section="site-settings-notifications">
           <div>
@@ -1044,6 +1317,68 @@
           </div>
         </div>
       </div>
+      <div class="section">
+        <div class="section-title">Allowed or blocked sites</div>
+        <div class="sublabel">Sites appear here after requesting permission, or you can add one manually.</div>
+        <div class="site-permission-list" id="notificationsSitePermissionList"></div>
+        <form class="site-permission-form" data-site-permission-form="notifications">
+          <input class="site-permission-input" type="text" name="origin" placeholder="https://example.com" />
+          <select class="setting-select" name="policy">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow</option>
+            <option value="block">Block</option>
+          </select>
+          <button class="action-btn" type="submit">Add site</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- SITE SETTINGS: LOCATION -->
+    <div class="panel" id="site-settings-location">
+      <h2>Location</h2>
+      <div class="section">
+        <div class="setting-row" data-open-section="site-settings" style="border-radius: 8px;">
+          <div>
+            <div class="label">Back to Site settings</div>
+            <div class="sublabel">Return to the Site settings page</div>
+          </div>
+          <svg class="chevron" viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Default behavior</div>
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Sites can ask for your location</div>
+            <div class="sublabel">Show a permission prompt when a website wants your location</div>
+          </div>
+          <select class="setting-select" data-setting-path="content.siteSettings.location">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow automatically</option>
+            <option value="block">Block automatically</option>
+          </select>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Current default</div>
+            <div class="sublabel" id="locationDefaultSummary">Ask before sharing your location.</div>
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Allowed or blocked sites</div>
+        <div class="sublabel">Sites appear here after requesting permission, or you can add one manually.</div>
+        <div class="site-permission-list" id="locationSitePermissionList"></div>
+        <form class="site-permission-form" data-site-permission-form="location">
+          <input class="site-permission-input" type="text" name="origin" placeholder="https://example.com" />
+          <select class="setting-select" name="policy">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow</option>
+            <option value="block">Block</option>
+          </select>
+          <button class="action-btn" type="submit">Add site</button>
+        </form>
+      </div>
     </div>
 
     <!-- SITE SETTINGS: CAMERA & MICROPHONE -->
@@ -1090,6 +1425,34 @@
             <div class="sublabel" id="cameraMicrophoneDefaultSummary">Camera: Ask before access. Microphone: Ask before access.</div>
           </div>
         </div>
+      </div>
+      <div class="section">
+        <div class="section-title">Camera site rules</div>
+        <div class="sublabel">Sites appear here after requesting permission, or you can add one manually.</div>
+        <div class="site-permission-list" id="cameraSitePermissionList"></div>
+        <form class="site-permission-form" data-site-permission-form="camera">
+          <input class="site-permission-input" type="text" name="origin" placeholder="https://example.com" />
+          <select class="setting-select" name="policy">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow</option>
+            <option value="block">Block</option>
+          </select>
+          <button class="action-btn" type="submit">Add site</button>
+        </form>
+      </div>
+      <div class="section">
+        <div class="section-title">Microphone site rules</div>
+        <div class="sublabel">Sites appear here after requesting permission, or you can add one manually.</div>
+        <div class="site-permission-list" id="microphoneSitePermissionList"></div>
+        <form class="site-permission-form" data-site-permission-form="microphone">
+          <input class="site-permission-input" type="text" name="origin" placeholder="https://example.com" />
+          <select class="setting-select" name="policy">
+            <option value="ask" selected>Ask</option>
+            <option value="allow">Allow</option>
+            <option value="block">Block</option>
+          </select>
+          <button class="action-btn" type="submit">Add site</button>
+        </form>
       </div>
     </div>
 
@@ -1239,10 +1602,7 @@
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label-line">
-              <div class="label">Force high contrast</div>
-              <span class="status-tag">Coming Soon</span>
-            </div>
+            <div class="label">Force high contrast</div>
             <div class="sublabel">Improve readability on all sites</div>
           </div>
           <div class="toggle" data-setting-path="accessibility.highContrast"></div>
@@ -1270,7 +1630,17 @@
           </div>
           <div class="toggle" data-setting-path="system.backgroundApps"></div>
         </div>
-        <div class="setting-row" data-open-url="ghost://codec-test">
+        <div class="setting-row">
+          <div>
+            <div class="label">Proxy mode</div>
+            <div class="sublabel">Use your system proxy settings or bypass proxies for all requests</div>
+          </div>
+          <select class="setting-select" data-setting-path="system.proxyMode">
+            <option value="system" selected>Use system proxy settings</option>
+            <option value="none">Direct connection</option>
+          </select>
+        </div>
+        <div class="setting-row" data-open-url="qrc:///pages/codec-test.html">
           <div>
             <div class="label">Codec test</div>
             <div class="sublabel">Open the internal media codec verification page</div>
@@ -1283,7 +1653,7 @@
               <div class="label">Proxy settings</div>
               <span class="status-tag">Coming Soon</span>
             </div>
-            <div class="sublabel">Configure network proxy</div>
+            <div class="sublabel">Manual proxy host and port configuration are still pending</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
@@ -1415,7 +1785,7 @@
       window.GhostSettingsBridge.refreshHistory();
     }
     if (nav === 'cookies' && window.GhostSettingsBridge.refreshCookies) {
-      window.GhostSettingsBridge.refreshCookies();
+      window.GhostSettingsBridge.refreshCookies(true);
     }
   });
 
