@@ -193,6 +193,9 @@
     letter-spacing: 0.25px;
     text-transform: uppercase;
   }
+  .setting-row .status-tag.tag-ok  { background: #3DBE6D; color: #fff; }
+  .setting-row .status-tag.tag-err { background: #CF4D6F; color: #fff; }
+  .setting-row .status-tag.tag-dim { background: #444; color: #aaa; }
   .setting-row .chevron {
     width: 16px; height: 16px;
     stroke: #666; fill: none;
@@ -201,6 +204,19 @@
   .setting-row .value {
     font-size: 13px;
     color: #7C7FE8;
+  }
+  .setting-input {
+    background: #2A2A3C;
+    color: #E0E0E0;
+    border: 1px solid #3A3A4A;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 13px;
+    min-width: 200px;
+  }
+  .setting-input:focus {
+    outline: none;
+    border-color: #5B5FC7;
   }
 
   /* Toggle switch */
@@ -800,6 +816,24 @@
     font-size: 14px;
   }
 
+  .bookmark-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 1.4fr) auto;
+    gap: 12px;
+    padding: 16px 40px 0;
+    align-items: end;
+    flex-shrink: 0;
+  }
+  .bookmark-form .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .bookmark-form label {
+    font-size: 12px;
+    color: #888;
+  }
+
   /* Light theme overrides for cookies */
   body.light-theme .cookie-toolbar { border-color: #D9DFEA; }
   body.light-theme .cookie-toolbar h2 { color: #1F2430; }
@@ -918,33 +952,31 @@
     <div class="panel active" id="get-started">
       <h2>Get started</h2>
       <div class="section">
-        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+        <div class="setting-row" data-open-section="get-started-profile" style="border-radius: 8px 8px 0 0;">
           <div>
-            <div class="label-line">
-              <div class="label">Profile name and icon</div>
-              <span class="status-tag">Coming Soon</span>
-            </div>
+            <div class="label">Profile name and icon</div>
+            <div class="sublabel">Set a local profile name. Avatar customization will come later; the dashboard now uses the shipped default profile placeholder image for now.</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
         <div class="setting-row" style="border-radius: 0 0 8px 8px;">
           <div>
-            <div class="label-line">
-              <div class="label">Import bookmarks and settings</div>
-              <span class="status-tag">Coming Soon</span>
-            </div>
+            <div class="label">Import bookmarks and settings</div>
+            <div class="sublabel">Imports a Ghost settings JSON file here. Bookmark import and export now live in the Bookmarks tab.</div>
           </div>
-          <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+          <button class="action-btn" data-action="importSettings">Import</button>
         </div>
       </div>
       <div class="section">
         <div class="setting-row" style="border-radius: 8px;">
           <div>
             <div class="label-line">
-              <div class="label">Ghost is your default browser</div>
-              <span class="status-tag">Coming Soon</span>
+              <div class="label">Default Browser Check</div>
+              <span class="status-tag tag-dim" id="defaultBrowserStatusBadge">Checking…</span>
             </div>
+            <div class="sublabel" id="defaultBrowserSummary">Checking whether Ghost currently owns HTTP and HTTPS associations on this Windows profile…</div>
           </div>
+          <button class="action-btn" data-action="openDefaultAppsSettings">Open Defaults</button>
         </div>
       </div>
       <div class="section">
@@ -973,12 +1005,59 @@
             <option value="about:blank">Blank page</option>
           </select>
         </div>
-        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
-          <div class="label-line">
+        <div class="setting-row" data-open-section="get-started-newtab" style="border-radius: 0 0 8px 8px;">
+          <div>
             <div class="label">Customize new tab page</div>
-            <span class="status-tag">Coming Soon</span>
+            <div class="sublabel">Choose which dashboard modules show on the Ghost start surface.</div>
           </div>
           <svg class="chevron" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="get-started-profile">
+      <h2>Profile name and icon</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px;">
+          <div>
+            <div class="label">Profile name</div>
+            <div class="sublabel">Shown on the Ghost dashboard header. The avatar slot currently uses the bundled default profile placeholder image.</div>
+          </div>
+          <input class="setting-input" type="text" maxlength="48" data-setting-path="general.profileName" placeholder="Ghost User">
+        </div>
+      </div>
+    </div>
+
+    <div class="panel" id="get-started-newtab">
+      <h2>Customize new tab page</h2>
+      <div class="section">
+        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
+          <div>
+            <div class="label">Weather module</div>
+            <div class="sublabel">Show the live weather card in the dashboard hero.</div>
+          </div>
+          <div class="toggle on" data-setting-path="general.newTabModules.weather"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Quick launch</div>
+            <div class="sublabel">Show the shortcuts panel below the hero section.</div>
+          </div>
+          <div class="toggle on" data-setting-path="general.newTabModules.shortcuts"></div>
+        </div>
+        <div class="setting-row">
+          <div>
+            <div class="label">Morning briefing</div>
+            <div class="sublabel">Show the curated reading links panel.</div>
+          </div>
+          <div class="toggle on" data-setting-path="general.newTabModules.briefing"></div>
+        </div>
+        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
+          <div>
+            <div class="label">Focus panel</div>
+            <div class="sublabel">Show Ghost product tips and status reminders.</div>
+          </div>
+          <div class="toggle on" data-setting-path="general.newTabModules.focus"></div>
         </div>
       </div>
     </div>
@@ -1030,37 +1109,6 @@
             <option value="110">110%</option>
             <option value="125">125%</option>
             <option value="150">150%</option>
-          </select>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-title">Status overlay</div>
-        <div class="setting-row" style="border-radius: 8px 8px 0 0;">
-          <div>
-            <div class="label">Style</div>
-            <div class="sublabel">Choose whether the bottom status surface is hidden, clear, frosted, or solid</div>
-          </div>
-          <select class="setting-select" data-setting-path="appearance.statusOverlayMode">
-            <option value="off">Off</option>
-            <option value="transparent">Transparent overlay</option>
-            <option value="frosted" selected>Frosted overlay</option>
-            <option value="solid">Solid overlay</option>
-          </select>
-        </div>
-        <div class="setting-row" style="border-radius: 0 0 8px 8px;">
-          <div>
-            <div class="label">Overlay opacity</div>
-            <div class="sublabel">Control the background transparency from invisible to fully opaque when the style supports it</div>
-          </div>
-          <select class="setting-select" data-setting-path="appearance.statusOverlayOpacity">
-            <option value="0">0%</option>
-            <option value="15">15%</option>
-            <option value="25">25%</option>
-            <option value="42" selected>42%</option>
-            <option value="55">55%</option>
-            <option value="70">70%</option>
-            <option value="85">85%</option>
-            <option value="100">100%</option>
           </select>
         </div>
       </div>
@@ -1716,6 +1764,29 @@
     </div>
   </div>
 
+  <!-- ── Bookmark view ── -->
+  <div class="cookie-view" id="bookmarkView">
+    <div class="cookie-toolbar">
+      <h2>Bookmarks</h2>
+      <button class="action-btn" type="button" data-bookmark-action="import">Import bookmarks</button>
+      <button class="action-btn" type="button" data-bookmark-action="export">Export bookmarks</button>
+    </div>
+    <form class="bookmark-form" id="bookmarkForm">
+      <div class="field">
+        <label for="bookmarkTitle">Title</label>
+        <input id="bookmarkTitle" class="setting-input" name="title" type="text" placeholder="Ghost Docs">
+      </div>
+      <div class="field">
+        <label for="bookmarkUrl">URL</label>
+        <input id="bookmarkUrl" class="setting-input" name="url" type="url" placeholder="https://example.com" required>
+      </div>
+      <button class="action-btn" type="submit">Add bookmark</button>
+    </form>
+    <div class="cookie-list" id="bookmarkList">
+      <div class="cookie-empty">No bookmarks yet. Add one below to populate the toolbar.</div>
+    </div>
+  </div>
+
 </div><!-- end .main -->
 <script>
 (function() {
@@ -1747,7 +1818,9 @@
     const sectionId = row.dataset.openSection;
     if (!sectionId) return;
 
-    const activeSidebarSection = sectionId.startsWith('site-settings') ? 'content' : sectionId;
+    const activeSidebarSection = sectionId.startsWith('site-settings')
+      ? 'content'
+      : (sectionId.startsWith('get-started-') ? 'get-started' : sectionId);
     showSection(sectionId, activeSidebarSection);
   });
 
@@ -1767,27 +1840,59 @@
   const settingsView = document.getElementById('settingsView');
   const historyView = document.getElementById('historyView');
   const cookieView = document.getElementById('cookieView');
+  const bookmarkView = document.getElementById('bookmarkView');
+
+  function showTopView(nav) {
+    const activeNav = nav === 'history' || nav === 'cookies' || nav === 'bookmarks' ? nav : 'settings';
+
+    topBar.querySelectorAll('a[data-topnav]').forEach(a => {
+      a.classList.toggle('active', a.dataset.topnav === activeNav);
+    });
+
+    settingsView.style.display = activeNav === 'settings' ? 'flex' : 'none';
+    historyView.classList.toggle('active', activeNav === 'history');
+    cookieView.classList.toggle('active', activeNav === 'cookies');
+    bookmarkView.classList.toggle('active', activeNav === 'bookmarks');
+
+    if (activeNav === 'history' && window.GhostSettingsBridge.refreshHistory) {
+      window.GhostSettingsBridge.refreshHistory();
+    }
+    if (activeNav === 'cookies' && window.GhostSettingsBridge.refreshCookies) {
+      window.GhostSettingsBridge.refreshCookies(true);
+    }
+    if (activeNav === 'bookmarks' && window.GhostSettingsBridge.refreshBookmarks) {
+      window.GhostSettingsBridge.refreshBookmarks();
+    }
+  }
+
+  function currentTopView() {
+    const hash = (window.location.hash || '').replace(/^#/, '').trim().toLowerCase();
+    if (hash === 'history' || hash === 'cookies' || hash === 'bookmarks') {
+      return hash;
+    }
+    return 'settings';
+  }
 
   topBar.addEventListener('click', function(e) {
     const link = e.target.closest('a[data-topnav]');
     if (!link) return;
     e.preventDefault();
 
-    topBar.querySelectorAll('a').forEach(a => a.classList.remove('active'));
-    link.classList.add('active');
-
     const nav = link.dataset.topnav;
-    settingsView.style.display = (nav === 'settings') ? 'flex' : 'none';
-    historyView.classList.toggle('active', nav === 'history');
-    cookieView.classList.toggle('active', nav === 'cookies');
+    if (nav === 'settings') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    } else if (nav === 'history' || nav === 'cookies' || nav === 'bookmarks') {
+      window.location.hash = nav;
+    }
 
-    if (nav === 'history' && window.GhostSettingsBridge.refreshHistory) {
-      window.GhostSettingsBridge.refreshHistory();
-    }
-    if (nav === 'cookies' && window.GhostSettingsBridge.refreshCookies) {
-      window.GhostSettingsBridge.refreshCookies(true);
-    }
+    showTopView(nav);
   });
+
+  window.addEventListener('hashchange', function() {
+    showTopView(currentTopView());
+  });
+
+  showTopView(currentTopView());
 
 })();
 </script>

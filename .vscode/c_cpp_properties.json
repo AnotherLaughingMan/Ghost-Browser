@@ -1,0 +1,48 @@
+{
+  "configurations": [
+    {
+      "name": "Ghost Qt MSVC",
+      "compilerPath": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe",
+      "intelliSenseMode": "windows-msvc-x64",
+      "cStandard": "c17",
+      "cppStandard": "c++20",
+      "defines": [
+        "UNICODE",
+        "_UNICODE",
+        "WIN32",
+        "_WINDOWS",
+        "QT_CORE_LIB",
+        "QT_GUI_LIB",
+        "QT_NETWORK_LIB",
+        "QT_SQL_LIB",
+        "QT_WEBCHANNEL_LIB",
+        "QT_WEBENGINECORE_LIB",
+        "QT_WEBENGINEWIDGETS_LIB",
+        "QT_WIDGETS_LIB"
+      ],
+      "includePath": [
+        "${workspaceFolder}/src",
+        "${workspaceFolder}/build/GhostBrowser_autogen/include_Debug",
+        "${workspaceFolder}/build/GhostBrowser_autogen/include_Release",
+        "C:/Qt/6.9.3/msvc2022_64/include",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtCore",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtGui",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtNetwork",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtSql",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtWebChannel",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtWebEngineCore",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtWebEngineWidgets",
+        "C:/Qt/6.9.3/msvc2022_64/include/QtWidgets",
+        "C:/Qt/6.9.3/msvc2022_64/mkspecs/win32-msvc"
+      ],
+      "browse": {
+        "path": [
+          "${workspaceFolder}/src",
+          "C:/Qt/6.9.3/msvc2022_64/include"
+        ],
+        "limitSymbolsToIncludedHeaders": true
+      }
+    }
+  ],
+  "version": 4
+}

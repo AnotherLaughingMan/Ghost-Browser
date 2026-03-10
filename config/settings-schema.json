@@ -15,6 +15,17 @@
         "searchEngine": {
           "type": "string",
           "enum": ["duckduckgo", "google", "bing", "brave", "startpage"]
+        },
+        "profileName": { "type": "string", "minLength": 1, "maxLength": 48 },
+        "newTabModules": {
+          "type": "object",
+          "properties": {
+            "weather": { "type": "boolean" },
+            "shortcuts": { "type": "boolean" },
+            "briefing": { "type": "boolean" },
+            "focus": { "type": "boolean" }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -25,9 +36,7 @@
         "theme": { "type": "string", "enum": ["dark", "light", "system"] },
         "showBookmarksBar": { "type": "boolean" },
         "fontSize": { "type": "integer", "minimum": 8, "maximum": 36 },
-        "zoomLevel": { "type": "integer", "minimum": 25, "maximum": 500 },
-        "statusOverlayMode": { "type": "string", "enum": ["off", "transparent", "frosted", "solid"] },
-        "statusOverlayOpacity": { "type": "integer", "minimum": 0, "maximum": 100 }
+        "zoomLevel": { "type": "integer", "minimum": 25, "maximum": 500 }
       },
       "additionalProperties": false
     },

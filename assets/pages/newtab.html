@@ -38,6 +38,16 @@
     gap: 20px;
     align-items: stretch;
   }
+  .hero-main {
+    display: flex;
+    flex-direction: column;
+  }
+  .hero-topline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
   .hero-card,
   .panel {
     background: rgba(19, 25, 39, 0.78);
@@ -53,6 +63,37 @@
     letter-spacing: 0.16em;
     color: #8C95B7;
     margin-bottom: 14px;
+  }
+  .profile-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    align-self: flex-start;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(156, 170, 211, 0.16);
+    border-radius: 999px;
+    padding: 6px 12px 6px 8px;
+    color: #DCE4FF;
+  }
+  .profile-glyph {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: linear-gradient(180deg, rgba(125, 146, 255, 0.34), rgba(82, 98, 158, 0.34));
+    border: 1px solid rgba(156, 170, 211, 0.18);
+    padding: 6px;
+  }
+  .profile-glyph img {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+  .profile-name {
+    font-size: 0.88rem;
+    font-weight: 600;
   }
   .clock {
     font-size: clamp(3.8rem, 9vw, 6rem);
@@ -264,8 +305,14 @@
 <body>
 <div class="container">
   <div class="hero">
-    <section class="hero-card">
-      <div class="eyebrow">Ghost dashboard</div>
+    <section class="hero-card hero-main">
+      <div class="hero-topline">
+        <div class="eyebrow">Ghost dashboard</div>
+        <div class="profile-chip" id="profileChip">
+          <div class="profile-glyph" id="profileGlyph"><img src="qrc:///placeholders/default_profile_placeholder.png" alt="Ghost profile placeholder"></div>
+          <div class="profile-name" id="profileName">Ghost User</div>
+        </div>
+      </div>
       <div class="clock" id="clock"></div>
       <div class="date-line" id="dateLine"></div>
       <div class="hero-copy">A calmer starting point with search, weather, and a daily briefing surface. This is the first pass at the dashboard/news/weather direction.</div>
@@ -277,7 +324,7 @@
       </div>
     </section>
 
-    <aside class="hero-card weather-card">
+    <aside class="hero-card weather-card" id="weatherCard">
       <div class="weather-top">
         <div>
           <div class="weather-label">Weather snapshot</div>
@@ -292,12 +339,12 @@
   </div>
 
   <div class="grid">
-    <section class="panel">
+    <section class="panel" id="shortcutsPanel">
       <div class="panel-title">Quick launch</div>
       <div class="shortcuts" id="shortcuts"></div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="briefingPanel">
       <div class="panel-title">Morning briefing</div>
       <div class="briefing-list">
         <a class="briefing-link" href="https://www.reuters.com/world/">
@@ -318,7 +365,7 @@
       </div>
     </section>
 
-    <section class="panel">
+    <section class="panel" id="focusPanel">
       <div class="panel-title">Focus</div>
       <div class="focus-list">
         <div class="focus-item">
@@ -342,6 +389,12 @@
   const clockEl = document.getElementById('clock');
   const dateLineEl = document.getElementById('dateLine');
   const shortcutsEl = document.getElementById('shortcuts');
+  const weatherCardEl = document.getElementById('weatherCard');
+  const shortcutsPanelEl = document.getElementById('shortcutsPanel');
+  const briefingPanelEl = document.getElementById('briefingPanel');
+  const focusPanelEl = document.getElementById('focusPanel');
+  const profileNameEl = document.getElementById('profileName');
+  const profileGlyphEl = document.getElementById('profileGlyph');
   const weatherCityEl = document.getElementById('weatherCity');
   const weatherTempEl = document.getElementById('weatherTemp');
   const weatherMetaEl = document.getElementById('weatherMeta');
@@ -351,6 +404,9 @@
   let weatherRequestId = 0;
   let weatherBridgePromise = null;
   let weatherBridgeConnected = false;
+  let settingsBridgePromise = null;
+  let settingsBridgeConnected = false;
+  let dashboardSettings = null;
 
   const shortcuts = [
     { label: 'GitHub', icon: 'GH', href: 'https://github.com' },
@@ -371,6 +427,64 @@
     `;
     shortcutsEl.appendChild(link);
   });
+
+  function applyDashboardSettings(settings) {
+    dashboardSettings = settings;
+    const general = settings && settings.general ? settings.general : {};
+    const modules = general.newTabModules || {};
+    const profileName = (general.profileName || 'Ghost User').trim();
+
+    profileNameEl.textContent = profileName || 'Ghost User';
+
+    weatherCardEl.style.display = modules.weather === false ? 'none' : '';
+    shortcutsPanelEl.style.display = modules.shortcuts === false ? 'none' : '';
+    briefingPanelEl.style.display = modules.briefing === false ? 'none' : '';
+    focusPanelEl.style.display = modules.focus === false ? 'none' : '';
+  }
+
+  function connectSettingsBridge() {
+    return new Promise((resolve) => {
+      let attempts = 0;
+      const maxAttempts = 100;
+
+      function tryConnect() {
+        if (window.QWebChannel && window.qt && window.qt.webChannelTransport) {
+          new window.QWebChannel(window.qt.webChannelTransport, (channel) => {
+            resolve(channel.objects && channel.objects.ghostSettings ? channel.objects.ghostSettings : null);
+          });
+          return;
+        }
+
+        if (++attempts >= maxAttempts) {
+          resolve(null);
+          return;
+        }
+
+        setTimeout(tryConnect, 50);
+      }
+
+      tryConnect();
+    });
+  }
+
+  async function getSettingsBridge() {
+    if (!settingsBridgePromise) {
+      settingsBridgePromise = connectSettingsBridge();
+    }
+
+    const bridge = await settingsBridgePromise;
+    if (bridge && !settingsBridgeConnected) {
+      bridge.settingsChanged.connect((settingsJson) => {
+        try {
+          applyDashboardSettings(JSON.parse(settingsJson));
+        } catch {
+        }
+      });
+      settingsBridgeConnected = true;
+    }
+
+    return bridge;
+  }
 
   function tick() {
     const now = new Date();
@@ -634,6 +748,11 @@
     const requestId = ++weatherRequestId;
     const timeoutMs = 15000;
 
+    if (dashboardSettings && dashboardSettings.general && dashboardSettings.general.newTabModules
+        && dashboardSettings.general.newTabModules.weather === false) {
+      return;
+    }
+
     weatherRefreshBtn.disabled = true;
     weatherRefreshBtn.textContent = 'Refreshing…';
     weatherStatusEl.textContent = 'Refreshing weather…';
@@ -686,7 +805,17 @@
   }
 
   weatherRefreshBtn.addEventListener('click', loadWeather);
-  loadWeather();
+
+  (async function initializeDashboardSettings() {
+    const bridge = await getSettingsBridge();
+    if (bridge && typeof bridge.getSettingsJson === 'function') {
+      try {
+        applyDashboardSettings(JSON.parse(await bridge.getSettingsJson()));
+      } catch {
+      }
+    }
+    loadWeather();
+  })();
 })();
 </script>
 </body>

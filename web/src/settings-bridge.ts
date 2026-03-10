@@ -12,14 +12,19 @@ interface GhostSettings {
     startupBehavior: 'newTab' | 'lastSession' | 'specificPages';
     homePage: string;
     searchEngine: string;
+    profileName: string;
+    newTabModules: {
+      weather: boolean;
+      shortcuts: boolean;
+      briefing: boolean;
+      focus: boolean;
+    };
   };
   appearance: {
     theme: 'dark' | 'light' | 'system';
     showBookmarksBar: boolean;
     fontSize: number;
     zoomLevel: number;
-    statusOverlayMode: 'off' | 'transparent' | 'frosted' | 'solid';
-    statusOverlayOpacity: number;
   };
   content: {
     autoplay: boolean;
@@ -72,6 +77,7 @@ declare interface Window {
     refreshHistory?: () => Promise<void>;
     refreshCookies?: (forceReload?: boolean) => Promise<void>;
     refreshProtection?: () => Promise<void>;
+    refreshBookmarks?: () => Promise<void>;
   };
   QWebChannel?: new (transport: unknown, callback: (channel: { objects: Record<string, ChannelObjects> }) => void) => void;
   qt?: { webChannelTransport?: unknown };
@@ -86,7 +92,10 @@ interface GhostBridge {
   getSettingsJson(): Promise<string>;
   getSitePermissionRulesJson(): Promise<string>;
   updateSetting(path: string, value: unknown): void;
+  importSettingsFromFile(): Promise<string>;
   chooseDownloadPath(): Promise<string>;
+  openDefaultAppsSettings(): Promise<boolean>;
+  getDefaultBrowserStatus(): Promise<string>;
   resetToDefaults(): Promise<boolean>;
   requestClearBrowsingData(): void;
   upsertSitePermissionRule(permissionType: string, origin: string, policy: string): Promise<boolean>;
@@ -115,6 +124,23 @@ interface GhostProtectionBridge {
   getEventsJson(): Promise<string>;
   clear(): void;
   eventsChanged: { connect: (callback: () => void) => void };
+}
+
+interface GhostBookmarkEntry {
+  id: string;
+  title: string;
+  url: string;
+  createdAt?: string;
+}
+
+interface GhostBookmarkBridge {
+  getBookmarksJson(): Promise<string>;
+  addBookmark(title: string, url: string): Promise<boolean>;
+  updateBookmark(id: string, title: string, url: string): Promise<boolean>;
+  deleteBookmark(id: string): Promise<boolean>;
+  importBookmarksFromFile(): Promise<string>;
+  exportBookmarksToFile(): Promise<string>;
+  bookmarksChanged: { connect: (callback: () => void) => void };
 }
 
 interface CookieEntry {
@@ -169,14 +195,19 @@ function defaultSettings(): GhostSettings {
       startupBehavior: 'newTab',
       homePage: 'ghost://newtab',
       searchEngine: 'duckduckgo',
+      profileName: 'Ghost User',
+      newTabModules: {
+        weather: true,
+        shortcuts: true,
+        briefing: true,
+        focus: true,
+      },
     },
     appearance: {
       theme: 'dark',
       showBookmarksBar: false,
       fontSize: 16,
       zoomLevel: 100,
-      statusOverlayMode: 'frosted',
-      statusOverlayOpacity: 42,
     },
     content: {
       autoplay: true,
@@ -229,6 +260,64 @@ function defaultSettings(): GhostSettings {
   };
 }
 
+function normalizeSettings(raw: unknown): GhostSettings {
+  const defaults = defaultSettings();
+  const source = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+
+  return {
+    ...defaults,
+    ...source,
+    general: {
+      ...defaults.general,
+      ...(source.general as Record<string, unknown> | undefined),
+      newTabModules: {
+        ...defaults.general.newTabModules,
+        ...((source.general as { newTabModules?: Record<string, unknown> } | undefined)?.newTabModules ?? {}),
+      },
+    },
+    appearance: {
+      ...defaults.appearance,
+      ...(source.appearance as Record<string, unknown> | undefined),
+    },
+    content: {
+      ...defaults.content,
+      ...(source.content as Record<string, unknown> | undefined),
+      siteSettings: {
+        ...defaults.content.siteSettings,
+        ...((source.content as { siteSettings?: Record<string, unknown> } | undefined)?.siteSettings ?? {}),
+      },
+      sitePermissionRules: {
+        ...defaults.content.sitePermissionRules,
+        ...((source.content as { sitePermissionRules?: Partial<SitePermissionRules> } | undefined)?.sitePermissionRules ?? {}),
+      },
+    },
+    privacy: {
+      ...defaults.privacy,
+      ...(source.privacy as Record<string, unknown> | undefined),
+    },
+    downloads: {
+      ...defaults.downloads,
+      ...(source.downloads as Record<string, unknown> | undefined),
+    },
+    languages: {
+      ...defaults.languages,
+      ...(source.languages as Record<string, unknown> | undefined),
+    },
+    system: {
+      ...defaults.system,
+      ...(source.system as Record<string, unknown> | undefined),
+    },
+    protection: {
+      ...defaults.protection,
+      ...(source.protection as Record<string, unknown> | undefined),
+    },
+    accessibility: {
+      ...defaults.accessibility,
+      ...(source.accessibility as Record<string, unknown> | undefined),
+    },
+  };
+}
+
 function getAtPath(settings: Record<string, unknown>, path: string): unknown {
   return path.split('.').reduce<unknown>((current, key) => {
     if (current && typeof current === 'object' && key in current) {
@@ -247,6 +336,7 @@ interface Bridges {
   history: GhostHistoryBridge | null;
   cookies: GhostCookieBridge | null;
   protection: GhostProtectionBridge | null;
+  bookmarks: GhostBookmarkBridge | null;
 }
 
 function connectBridge(): Promise<Bridges> {
@@ -264,12 +354,13 @@ function connectBridge(): Promise<Bridges> {
             history: (channel.objects.ghostHistory as GhostHistoryBridge) ?? null,
             cookies: (channel.objects.ghostCookies as GhostCookieBridge) ?? null,
             protection: (channel.objects.ghostProtection as GhostProtectionBridge) ?? null,
+            bookmarks: (channel.objects.ghostBookmarks as GhostBookmarkBridge) ?? null,
           });
         });
         return;
       }
       if (++attempts >= MAX_ATTEMPTS) {
-        resolve({ settings: null, history: null, cookies: null, protection: null });
+        resolve({ settings: null, history: null, cookies: null, protection: null, bookmarks: null });
         return;
       }
       setTimeout(tryConnect, 50);
@@ -299,6 +390,11 @@ function applyState(settings: GhostSettings): void {
     }
 
     if (element instanceof HTMLSelectElement && value !== undefined) {
+      element.value = String(value);
+      return;
+    }
+
+    if (element instanceof HTMLInputElement && value !== undefined) {
       element.value = String(value);
     }
   });
@@ -670,16 +766,18 @@ async function initializeSettingsPage(): Promise<void> {
     history: historyBridge,
     cookies: cookieBridge,
     protection: protectionBridge,
+    bookmarks: bookmarkBridge,
   } = await connectBridge();
   // Qt 6 QWebChannel methods return Promises — must be awaited.
-  let settings = bridge ? JSON.parse(await bridge.getSettingsJson()) as GhostSettings : defaultSettings();
+  let settings = bridge ? normalizeSettings(JSON.parse(await bridge.getSettingsJson())) : defaultSettings();
+
 
   async function refreshSettingsState(): Promise<void> {
     if (!bridge) {
       return;
     }
 
-    settings = JSON.parse(await bridge.getSettingsJson()) as GhostSettings;
+    settings = normalizeSettings(JSON.parse(await bridge.getSettingsJson()));
     applyState(settings);
   }
 
@@ -687,9 +785,44 @@ async function initializeSettingsPage(): Promise<void> {
 
   if (bridge) {
     bridge.settingsChanged.connect((json: string) => {
-      settings = JSON.parse(json) as GhostSettings;
+      settings = normalizeSettings(JSON.parse(json));
       applyState(settings);
     });
+  }
+
+  const defaultBrowserSummary = document.getElementById('defaultBrowserSummary');
+  const defaultBrowserStatusBadge = document.getElementById('defaultBrowserStatusBadge');
+  async function refreshDefaultBrowserStatus(): Promise<void> {
+    if (!defaultBrowserSummary || !bridge) {
+      return;
+    }
+
+    const status = await bridge.getDefaultBrowserStatus();
+    if (status === 'default') {
+      defaultBrowserSummary.textContent = 'Ghost is currently the default browser — HTTP and HTTPS links open here.';
+      if (defaultBrowserStatusBadge) {
+        defaultBrowserStatusBadge.textContent = 'Default';
+        defaultBrowserStatusBadge.className = 'status-tag tag-ok';
+      }
+    } else if (status === 'not-default') {
+      defaultBrowserSummary.textContent = 'Ghost is not the default browser. Click "Open Defaults" and set Ghost for HTTP and HTTPS, then come back to confirm.';
+      if (defaultBrowserStatusBadge) {
+        defaultBrowserStatusBadge.textContent = 'Not Default';
+        defaultBrowserStatusBadge.className = 'status-tag tag-err';
+      }
+    } else if (status === 'unsupported') {
+      defaultBrowserSummary.textContent = 'Default browser detection is only available on Windows.';
+      if (defaultBrowserStatusBadge) {
+        defaultBrowserStatusBadge.textContent = 'Unsupported';
+        defaultBrowserStatusBadge.className = 'status-tag tag-dim';
+      }
+    } else {
+      defaultBrowserSummary.textContent = 'Could not confirm the default browser association.';
+      if (defaultBrowserStatusBadge) {
+        defaultBrowserStatusBadge.textContent = 'Unknown';
+        defaultBrowserStatusBadge.className = 'status-tag tag-dim';
+      }
+    }
   }
 
   document.addEventListener('click', (event) => {
@@ -739,6 +872,26 @@ async function initializeSettingsPage(): Promise<void> {
     });
   });
 
+  document.querySelectorAll<HTMLInputElement>('input[data-setting-path]').forEach((input) => {
+    const commit = () => {
+      const path = input.dataset.settingPath;
+      if (!path) {
+        return;
+      }
+
+      const nextValue = input.value.trim();
+      if (!nextValue) {
+        input.value = String(getAtPath(settings as unknown as Record<string, unknown>, path) || '');
+        return;
+      }
+
+      bridge?.updateSetting(path, nextValue);
+    };
+
+    input.addEventListener('change', commit);
+    input.addEventListener('blur', commit);
+  });
+
   document.querySelectorAll<HTMLButtonElement>('button[data-action]').forEach((button) => {
     button.addEventListener('click', async () => {
       if (!bridge) {
@@ -746,7 +899,16 @@ async function initializeSettingsPage(): Promise<void> {
       }
 
       const action = button.dataset.action;
-      if (action === 'chooseDownloadPath') {
+      if (action === 'importSettings') {
+        const importedPath = await bridge.importSettingsFromFile();
+        if (!importedPath) {
+          return;
+        }
+      } else if (action === 'openDefaultAppsSettings') {
+        await bridge.openDefaultAppsSettings();
+        await refreshDefaultBrowserStatus();
+        return;
+      } else if (action === 'chooseDownloadPath') {
         const selectedPath = await bridge.chooseDownloadPath();
         if (!selectedPath) {
           return;
@@ -763,6 +925,28 @@ async function initializeSettingsPage(): Promise<void> {
       }
 
       await refreshSettingsState();
+    });
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('button[data-bookmark-action]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!bookmarkBridge) {
+        return;
+      }
+
+      const action = button.dataset.bookmarkAction;
+      if (action === 'import') {
+        const importedPath = await bookmarkBridge.importBookmarksFromFile();
+        if (!importedPath) {
+          return;
+        }
+        await refreshBookmarks();
+        return;
+      }
+
+      if (action === 'export') {
+        await bookmarkBridge.exportBookmarksToFile();
+      }
     });
   });
 
@@ -875,6 +1059,8 @@ async function initializeSettingsPage(): Promise<void> {
   }
 
   // ── Cookie wiring ──
+  const bookmarkList = document.getElementById('bookmarkList');
+  const bookmarkForm = document.getElementById('bookmarkForm') as HTMLFormElement | null;
   const cookieList = document.getElementById('cookieList');
   const cookieSearch = document.getElementById('cookieSearch') as HTMLInputElement | null;
   const cookieClearRange = document.getElementById('cookieClearRange') as HTMLSelectElement | null;
@@ -885,6 +1071,7 @@ async function initializeSettingsPage(): Promise<void> {
   let cookieEntries: CookieEntry[] = [];
   let cookieFilter = '';
   let cookieRefreshToken = 0;
+  let bookmarkEntries: GhostBookmarkEntry[] = [];
   let protectionEntries: ProtectionEvent[] = [];
   let protectionSiteQuery = '';
   let protectionCategoryQuery = 'all';
@@ -911,6 +1098,122 @@ async function initializeSettingsPage(): Promise<void> {
   }
 
   window.GhostSettingsBridge.refreshCookies = refreshCookies;
+
+  async function refreshBookmarks(): Promise<void> {
+    if (!bookmarkBridge || !bookmarkList) {
+      return;
+    }
+
+    bookmarkEntries = JSON.parse(await bookmarkBridge.getBookmarksJson()) as GhostBookmarkEntry[];
+    if (bookmarkEntries.length === 0) {
+      bookmarkList.innerHTML = '<div class="cookie-empty">No bookmarks yet. Add one below to populate the toolbar.</div>';
+      return;
+    }
+
+    bookmarkList.innerHTML = '';
+    const fragment = document.createDocumentFragment();
+    bookmarkEntries.forEach((entry) => {
+      const row = document.createElement('div');
+      row.className = 'cookie-entry';
+      row.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;">
+          <span class="c-name" title="${escapeHtml(entry.title)}">${escapeHtml(entry.title)}</span>
+          <span class="h-url">${escapeHtml(entry.url)}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="action-btn bookmark-edit" data-id="${escapeHtml(entry.id)}" type="button">Edit</button>
+          <button class="action-btn danger bookmark-delete" data-id="${escapeHtml(entry.id)}" type="button">Remove</button>
+        </div>
+      `;
+      row.addEventListener('click', (event) => {
+        if ((event.target as HTMLElement).closest('button')) {
+          return;
+        }
+        window.location.href = entry.url;
+      });
+      fragment.appendChild(row);
+    });
+    bookmarkList.appendChild(fragment);
+  }
+
+  window.GhostSettingsBridge.refreshBookmarks = refreshBookmarks;
+
+  if (bookmarkBridge) {
+    bookmarkBridge.bookmarksChanged.connect(refreshBookmarks);
+  }
+
+  if (bookmarkForm) {
+    bookmarkForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (!bookmarkBridge) {
+        return;
+      }
+
+      const titleInput = bookmarkForm.querySelector<HTMLInputElement>('input[name="title"]');
+      const urlInput = bookmarkForm.querySelector<HTMLInputElement>('input[name="url"]');
+      if (!titleInput || !urlInput) {
+        return;
+      }
+
+      const title = titleInput.value.trim();
+      const url = urlInput.value.trim();
+      if (!url) {
+        urlInput.setCustomValidity('Enter a full URL like https://example.com');
+        urlInput.reportValidity();
+        return;
+      }
+
+      urlInput.setCustomValidity('');
+      const editingId = bookmarkForm.dataset.editingId;
+      const ok = editingId
+        ? await bookmarkBridge.updateBookmark(editingId, title, url)
+        : await bookmarkBridge.addBookmark(title, url);
+      if (!ok) {
+        urlInput.setCustomValidity('Ghost could not save that bookmark. Check the URL or try a different entry.');
+        urlInput.reportValidity();
+        return;
+      }
+
+      delete bookmarkForm.dataset.editingId;
+      const submitButton = bookmarkForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (submitButton) {
+        submitButton.textContent = 'Add bookmark';
+      }
+      bookmarkForm.reset();
+      await refreshBookmarks();
+    });
+  }
+
+  document.addEventListener('click', async (event) => {
+    const deleteButton = (event.target as HTMLElement).closest<HTMLButtonElement>('.bookmark-delete');
+    if (deleteButton && bookmarkBridge) {
+      await bookmarkBridge.deleteBookmark(deleteButton.dataset.id || '');
+      await refreshBookmarks();
+      return;
+    }
+
+    const editButton = (event.target as HTMLElement).closest<HTMLButtonElement>('.bookmark-edit');
+    if (editButton && bookmarkForm) {
+      const bookmark = bookmarkEntries.find((entry) => entry.id === (editButton.dataset.id || ''));
+      if (!bookmark) {
+        return;
+      }
+
+      const titleInput = bookmarkForm.querySelector<HTMLInputElement>('input[name="title"]');
+      const urlInput = bookmarkForm.querySelector<HTMLInputElement>('input[name="url"]');
+      const submitButton = bookmarkForm.querySelector<HTMLButtonElement>('button[type="submit"]');
+      if (!titleInput || !urlInput) {
+        return;
+      }
+
+      bookmarkForm.dataset.editingId = bookmark.id;
+      titleInput.value = bookmark.title;
+      urlInput.value = bookmark.url;
+      if (submitButton) {
+        submitButton.textContent = 'Save bookmark';
+      }
+    }
+  });
 
   function refreshProtectionCategoryOptions(): void {
     if (!protectionCategoryFilter) {
@@ -1006,10 +1309,13 @@ async function initializeSettingsPage(): Promise<void> {
     });
   }
 
+  await refreshDefaultBrowserStatus();
+
   // Eagerly populate as soon as bridge is ready, regardless of which tab is visible
   refreshHistory();
   refreshCookies(true);
   refreshProtection();
+  refreshBookmarks();
 }
 
 window.GhostSettingsBridge = {

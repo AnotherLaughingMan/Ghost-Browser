@@ -31,6 +31,8 @@ set(GHOST_SOURCES
     src/browser/GhostRequestInterceptor.h
     src/core/asm_fallbacks.cpp
     src/core/asm_fallbacks.h
+    src/core/BookmarkManager.cpp
+    src/core/BookmarkManager.h
     src/core/CookieManager.cpp
     src/core/CookieManager.h
     src/core/HistoryManager.cpp
@@ -41,8 +43,12 @@ set(GHOST_SOURCES
     src/core/SettingsManager.h
     src/core/WeatherService.cpp
     src/core/WeatherService.h
+    src/ui/LoadingCurtainWidget.cpp
+    src/ui/LoadingCurtainWidget.h
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/StatusBubbleWidget.cpp
+    src/ui/StatusBubbleWidget.h
 )
 
 # ---------- Qt Resources ----------

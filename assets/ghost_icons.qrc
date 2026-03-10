@@ -44,4 +44,7 @@
     <qresource prefix="/js">
         <file alias="settings-bridge.js">js/settings-bridge.js</file>
     </qresource>
+    <qresource prefix="/placeholders">
+        <file alias="default_profile_placeholder.png">placeholders/default_profile_placeholder.png</file>
+    </qresource>
 </RCC>

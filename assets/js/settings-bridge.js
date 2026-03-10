@@ -13,14 +13,19 @@ function defaultSettings() {
             startupBehavior: 'newTab',
             homePage: 'ghost://newtab',
             searchEngine: 'duckduckgo',
+            profileName: 'Ghost User',
+            newTabModules: {
+                weather: true,
+                shortcuts: true,
+                briefing: true,
+                focus: true,
+            },
         },
         appearance: {
             theme: 'dark',
             showBookmarksBar: false,
             fontSize: 16,
             zoomLevel: 100,
-            statusOverlayMode: 'frosted',
-            statusOverlayOpacity: 42,
         },
         content: {
             autoplay: true,
@@ -72,6 +77,62 @@ function defaultSettings() {
         },
     };
 }
+function normalizeSettings(raw) {
+    const defaults = defaultSettings();
+    const source = raw && typeof raw === 'object' ? raw : {};
+    return {
+        ...defaults,
+        ...source,
+        general: {
+            ...defaults.general,
+            ...source.general,
+            newTabModules: {
+                ...defaults.general.newTabModules,
+                ...(source.general?.newTabModules ?? {}),
+            },
+        },
+        appearance: {
+            ...defaults.appearance,
+            ...source.appearance,
+        },
+        content: {
+            ...defaults.content,
+            ...source.content,
+            siteSettings: {
+                ...defaults.content.siteSettings,
+                ...(source.content?.siteSettings ?? {}),
+            },
+            sitePermissionRules: {
+                ...defaults.content.sitePermissionRules,
+                ...(source.content?.sitePermissionRules ?? {}),
+            },
+        },
+        privacy: {
+            ...defaults.privacy,
+            ...source.privacy,
+        },
+        downloads: {
+            ...defaults.downloads,
+            ...source.downloads,
+        },
+        languages: {
+            ...defaults.languages,
+            ...source.languages,
+        },
+        system: {
+            ...defaults.system,
+            ...source.system,
+        },
+        protection: {
+            ...defaults.protection,
+            ...source.protection,
+        },
+        accessibility: {
+            ...defaults.accessibility,
+            ...source.accessibility,
+        },
+    };
+}
 function getAtPath(settings, path) {
     return path.split('.').reduce((current, key) => {
         if (current && typeof current === 'object' && key in current) {
@@ -98,12 +159,13 @@ function connectBridge() {
                         history: channel.objects.ghostHistory ?? null,
                         cookies: channel.objects.ghostCookies ?? null,
                         protection: channel.objects.ghostProtection ?? null,
+                        bookmarks: channel.objects.ghostBookmarks ?? null,
                     });
                 });
                 return;
             }
             if (++attempts >= MAX_ATTEMPTS) {
-                resolve({ settings: null, history: null, cookies: null, protection: null });
+                resolve({ settings: null, history: null, cookies: null, protection: null, bookmarks: null });
                 return;
             }
             setTimeout(tryConnect, 50);
@@ -128,6 +190,10 @@ function applyState(settings) {
             return;
         }
         if (element instanceof HTMLSelectElement && value !== undefined) {
+            element.value = String(value);
+            return;
+        }
+        if (element instanceof HTMLInputElement && value !== undefined) {
             element.value = String(value);
         }
     });
@@ -450,22 +516,58 @@ function renderProtectionDiagnostics(entries, list, summary, siteFilter, categor
     list.appendChild(fragment);
 }
 async function initializeSettingsPage() {
-    const { settings: bridge, history: historyBridge, cookies: cookieBridge, protection: protectionBridge, } = await connectBridge();
+    const { settings: bridge, history: historyBridge, cookies: cookieBridge, protection: protectionBridge, bookmarks: bookmarkBridge, } = await connectBridge();
     // Qt 6 QWebChannel methods return Promises — must be awaited.
-    let settings = bridge ? JSON.parse(await bridge.getSettingsJson()) : defaultSettings();
+    let settings = bridge ? normalizeSettings(JSON.parse(await bridge.getSettingsJson())) : defaultSettings();
     async function refreshSettingsState() {
         if (!bridge) {
             return;
         }
-        settings = JSON.parse(await bridge.getSettingsJson());
+        settings = normalizeSettings(JSON.parse(await bridge.getSettingsJson()));
         applyState(settings);
     }
     applyState(settings);
     if (bridge) {
         bridge.settingsChanged.connect((json) => {
-            settings = JSON.parse(json);
+            settings = normalizeSettings(JSON.parse(json));
             applyState(settings);
         });
+    }
+    const defaultBrowserSummary = document.getElementById('defaultBrowserSummary');
+    const defaultBrowserStatusBadge = document.getElementById('defaultBrowserStatusBadge');
+    async function refreshDefaultBrowserStatus() {
+        if (!defaultBrowserSummary || !bridge) {
+            return;
+        }
+        const status = await bridge.getDefaultBrowserStatus();
+        if (status === 'default') {
+            defaultBrowserSummary.textContent = 'Ghost is currently the default browser — HTTP and HTTPS links open here.';
+            if (defaultBrowserStatusBadge) {
+                defaultBrowserStatusBadge.textContent = 'Default';
+                defaultBrowserStatusBadge.className = 'status-tag tag-ok';
+            }
+        }
+        else if (status === 'not-default') {
+            defaultBrowserSummary.textContent = 'Ghost is not the default browser. Click "Open Defaults" and set Ghost for HTTP and HTTPS, then come back to confirm.';
+            if (defaultBrowserStatusBadge) {
+                defaultBrowserStatusBadge.textContent = 'Not Default';
+                defaultBrowserStatusBadge.className = 'status-tag tag-err';
+            }
+        }
+        else if (status === 'unsupported') {
+            defaultBrowserSummary.textContent = 'Default browser detection is only available on Windows.';
+            if (defaultBrowserStatusBadge) {
+                defaultBrowserStatusBadge.textContent = 'Unsupported';
+                defaultBrowserStatusBadge.className = 'status-tag tag-dim';
+            }
+        }
+        else {
+            defaultBrowserSummary.textContent = 'Could not confirm the default browser association.';
+            if (defaultBrowserStatusBadge) {
+                defaultBrowserStatusBadge.textContent = 'Unknown';
+                defaultBrowserStatusBadge.className = 'status-tag tag-dim';
+            }
+        }
     }
     document.addEventListener('click', (event) => {
         const toggle = event.target.closest('.toggle[data-setting-path]');
@@ -506,13 +608,40 @@ async function initializeSettingsPage() {
             bridge?.updateSetting(path, coerceValue(select.value));
         });
     });
+    document.querySelectorAll('input[data-setting-path]').forEach((input) => {
+        const commit = () => {
+            const path = input.dataset.settingPath;
+            if (!path) {
+                return;
+            }
+            const nextValue = input.value.trim();
+            if (!nextValue) {
+                input.value = String(getAtPath(settings, path) || '');
+                return;
+            }
+            bridge?.updateSetting(path, nextValue);
+        };
+        input.addEventListener('change', commit);
+        input.addEventListener('blur', commit);
+    });
     document.querySelectorAll('button[data-action]').forEach((button) => {
         button.addEventListener('click', async () => {
             if (!bridge) {
                 return;
             }
             const action = button.dataset.action;
-            if (action === 'chooseDownloadPath') {
+            if (action === 'importSettings') {
+                const importedPath = await bridge.importSettingsFromFile();
+                if (!importedPath) {
+                    return;
+                }
+            }
+            else if (action === 'openDefaultAppsSettings') {
+                await bridge.openDefaultAppsSettings();
+                await refreshDefaultBrowserStatus();
+                return;
+            }
+            else if (action === 'chooseDownloadPath') {
                 const selectedPath = await bridge.chooseDownloadPath();
                 if (!selectedPath) {
                     return;
@@ -531,6 +660,25 @@ async function initializeSettingsPage() {
                 return;
             }
             await refreshSettingsState();
+        });
+    });
+    document.querySelectorAll('button[data-bookmark-action]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            if (!bookmarkBridge) {
+                return;
+            }
+            const action = button.dataset.bookmarkAction;
+            if (action === 'import') {
+                const importedPath = await bookmarkBridge.importBookmarksFromFile();
+                if (!importedPath) {
+                    return;
+                }
+                await refreshBookmarks();
+                return;
+            }
+            if (action === 'export') {
+                await bookmarkBridge.exportBookmarksToFile();
+            }
         });
     });
     document.addEventListener('change', async (event) => {
@@ -629,6 +777,8 @@ async function initializeSettingsPage() {
         });
     }
     // ── Cookie wiring ──
+    const bookmarkList = document.getElementById('bookmarkList');
+    const bookmarkForm = document.getElementById('bookmarkForm');
     const cookieList = document.getElementById('cookieList');
     const cookieSearch = document.getElementById('cookieSearch');
     const cookieClearRange = document.getElementById('cookieClearRange');
@@ -639,6 +789,7 @@ async function initializeSettingsPage() {
     let cookieEntries = [];
     let cookieFilter = '';
     let cookieRefreshToken = 0;
+    let bookmarkEntries = [];
     let protectionEntries = [];
     let protectionSiteQuery = '';
     let protectionCategoryQuery = 'all';
@@ -661,6 +812,108 @@ async function initializeSettingsPage() {
         });
     }
     window.GhostSettingsBridge.refreshCookies = refreshCookies;
+    async function refreshBookmarks() {
+        if (!bookmarkBridge || !bookmarkList) {
+            return;
+        }
+        bookmarkEntries = JSON.parse(await bookmarkBridge.getBookmarksJson());
+        if (bookmarkEntries.length === 0) {
+            bookmarkList.innerHTML = '<div class="cookie-empty">No bookmarks yet. Add one below to populate the toolbar.</div>';
+            return;
+        }
+        bookmarkList.innerHTML = '';
+        const fragment = document.createDocumentFragment();
+        bookmarkEntries.forEach((entry) => {
+            const row = document.createElement('div');
+            row.className = 'cookie-entry';
+            row.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:0;flex:1;">
+          <span class="c-name" title="${escapeHtml(entry.title)}">${escapeHtml(entry.title)}</span>
+          <span class="h-url">${escapeHtml(entry.url)}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="action-btn bookmark-edit" data-id="${escapeHtml(entry.id)}" type="button">Edit</button>
+          <button class="action-btn danger bookmark-delete" data-id="${escapeHtml(entry.id)}" type="button">Remove</button>
+        </div>
+      `;
+            row.addEventListener('click', (event) => {
+                if (event.target.closest('button')) {
+                    return;
+                }
+                window.location.href = entry.url;
+            });
+            fragment.appendChild(row);
+        });
+        bookmarkList.appendChild(fragment);
+    }
+    window.GhostSettingsBridge.refreshBookmarks = refreshBookmarks;
+    if (bookmarkBridge) {
+        bookmarkBridge.bookmarksChanged.connect(refreshBookmarks);
+    }
+    if (bookmarkForm) {
+        bookmarkForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!bookmarkBridge) {
+                return;
+            }
+            const titleInput = bookmarkForm.querySelector('input[name="title"]');
+            const urlInput = bookmarkForm.querySelector('input[name="url"]');
+            if (!titleInput || !urlInput) {
+                return;
+            }
+            const title = titleInput.value.trim();
+            const url = urlInput.value.trim();
+            if (!url) {
+                urlInput.setCustomValidity('Enter a full URL like https://example.com');
+                urlInput.reportValidity();
+                return;
+            }
+            urlInput.setCustomValidity('');
+            const editingId = bookmarkForm.dataset.editingId;
+            const ok = editingId
+                ? await bookmarkBridge.updateBookmark(editingId, title, url)
+                : await bookmarkBridge.addBookmark(title, url);
+            if (!ok) {
+                urlInput.setCustomValidity('Ghost could not save that bookmark. Check the URL or try a different entry.');
+                urlInput.reportValidity();
+                return;
+            }
+            delete bookmarkForm.dataset.editingId;
+            const submitButton = bookmarkForm.querySelector('button[type="submit"]');
+            if (submitButton) {
+                submitButton.textContent = 'Add bookmark';
+            }
+            bookmarkForm.reset();
+            await refreshBookmarks();
+        });
+    }
+    document.addEventListener('click', async (event) => {
+        const deleteButton = event.target.closest('.bookmark-delete');
+        if (deleteButton && bookmarkBridge) {
+            await bookmarkBridge.deleteBookmark(deleteButton.dataset.id || '');
+            await refreshBookmarks();
+            return;
+        }
+        const editButton = event.target.closest('.bookmark-edit');
+        if (editButton && bookmarkForm) {
+            const bookmark = bookmarkEntries.find((entry) => entry.id === (editButton.dataset.id || ''));
+            if (!bookmark) {
+                return;
+            }
+            const titleInput = bookmarkForm.querySelector('input[name="title"]');
+            const urlInput = bookmarkForm.querySelector('input[name="url"]');
+            const submitButton = bookmarkForm.querySelector('button[type="submit"]');
+            if (!titleInput || !urlInput) {
+                return;
+            }
+            bookmarkForm.dataset.editingId = bookmark.id;
+            titleInput.value = bookmark.title;
+            urlInput.value = bookmark.url;
+            if (submitButton) {
+                submitButton.textContent = 'Save bookmark';
+            }
+        }
+    });
     function refreshProtectionCategoryOptions() {
         if (!protectionCategoryFilter) {
             return;
@@ -728,10 +981,12 @@ async function initializeSettingsPage() {
             cookieClearRange.selectedIndex = 0;
         });
     }
+    await refreshDefaultBrowserStatus();
     // Eagerly populate as soon as bridge is ready, regardless of which tab is visible
     refreshHistory();
     refreshCookies(true);
     refreshProtection();
+    refreshBookmarks();
 }
 window.GhostSettingsBridge = {
     initializeSettingsPage,

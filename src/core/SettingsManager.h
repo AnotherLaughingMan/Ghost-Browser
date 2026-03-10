@@ -20,7 +20,10 @@ public:
 
     Q_INVOKABLE QString getSettingsJson() const;
     Q_INVOKABLE bool updateSetting(const QString &path, const QVariant &value);
+    Q_INVOKABLE QString importSettingsFromFile();
     Q_INVOKABLE QString chooseDownloadPath();
+    Q_INVOKABLE bool openDefaultAppsSettings();
+    Q_INVOKABLE QString getDefaultBrowserStatus() const;
     Q_INVOKABLE bool resetToDefaults();
     Q_INVOKABLE void requestClearBrowsingData();
     Q_INVOKABLE QString getSitePermissionRulesJson() const;

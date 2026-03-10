@@ -3,15 +3,20 @@
   "general": {
     "startupBehavior": "newTab",
     "homePage": "ghost://newtab",
-    "searchEngine": "duckduckgo"
+    "searchEngine": "duckduckgo",
+    "profileName": "Ghost User",
+    "newTabModules": {
+      "weather": true,
+      "shortcuts": true,
+      "briefing": true,
+      "focus": true
+    }
   },
   "appearance": {
     "theme": "dark",
     "showBookmarksBar": false,
     "fontSize": 16,
-    "zoomLevel": 100,
-    "statusOverlayMode": "frosted",
-    "statusOverlayOpacity": 42
+    "zoomLevel": 100
   },
   "content": {
     "autoplay": true,

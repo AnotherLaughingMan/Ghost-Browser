@@ -1,14 +1,91 @@
 #include "core/SettingsManager.h"
 
 #include <QCoreApplication>
+#include <QApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMessageBox>
 #include <QStandardPaths>
+
+#include <QDebug>
+#include <QDesktopServices>
+
+#ifdef Q_OS_WIN
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
+namespace {
+
+QWidget *activeDialogParent()
+{
+    return QApplication::activeWindow();
+}
+
+#ifdef Q_OS_WIN
+QString readRegistryString(HKEY root, const QString &subKey, const wchar_t *valueName)
+{
+    DWORD type = 0;
+    DWORD size = 0;
+    const std::wstring nativeSubKey = subKey.toStdWString();
+    if (RegGetValueW(root, nativeSubKey.c_str(), valueName, RRF_RT_REG_SZ, &type, nullptr, &size) != ERROR_SUCCESS || size == 0)
+        return {};
+
+    std::wstring buffer(size / sizeof(wchar_t), L'\0');
+    if (RegGetValueW(root, nativeSubKey.c_str(), valueName, RRF_RT_REG_SZ, &type, buffer.data(), &size) != ERROR_SUCCESS)
+        return {};
+
+    const size_t terminator = buffer.find(L'\0');
+    if (terminator != std::wstring::npos)
+        buffer.resize(terminator);
+    return QString::fromStdWString(buffer);
+}
+
+QString executablePathFromCommand(const QString &command)
+{
+    const QString trimmed = command.trimmed();
+    if (trimmed.isEmpty())
+        return {};
+
+    QString executable;
+    if (trimmed.startsWith(QLatin1Char('"'))) {
+        const int endQuote = trimmed.indexOf(QLatin1Char('"'), 1);
+        executable = endQuote > 1 ? trimmed.mid(1, endQuote - 1) : trimmed.mid(1);
+    } else {
+        const int firstSpace = trimmed.indexOf(QLatin1Char(' '));
+        executable = firstSpace > 0 ? trimmed.left(firstSpace) : trimmed;
+    }
+
+    const QFileInfo fileInfo(executable);
+    const QString canonical = fileInfo.canonicalFilePath();
+    return (canonical.isEmpty() ? fileInfo.absoluteFilePath() : canonical).toLower();
+}
+
+QString commandForProgId(const QString &progId)
+{
+    if (progId.isEmpty())
+        return {};
+
+    const QString classesPath = progId + QStringLiteral("\\shell\\open\\command");
+    QString command = readRegistryString(HKEY_CURRENT_USER, QStringLiteral("Software\\Classes\\") + classesPath, nullptr);
+    if (!command.isEmpty())
+        return command;
+
+    command = readRegistryString(HKEY_LOCAL_MACHINE, QStringLiteral("Software\\Classes\\") + classesPath, nullptr);
+    if (!command.isEmpty())
+        return command;
+
+    return readRegistryString(HKEY_CLASSES_ROOT, classesPath, nullptr);
+}
+#endif
+
+}
 
 SettingsManager::SettingsManager(QObject *parent)
     : QObject(parent)
@@ -45,13 +122,59 @@ QString SettingsManager::getSettingsJson() const
 
 bool SettingsManager::updateSetting(const QString &path, const QVariant &value)
 {
-    if (!setValueAtPath(path, QJsonValue::fromVariant(value)))
+    qDebug() << "[SettingsManager] updateSetting" << path << "=" << value
+             << "variant-type:" << value.typeName();
+    const QJsonValue jv = QJsonValue::fromVariant(value);
+    qDebug() << "[SettingsManager] QJsonValue type:" << jv.type() << "toVariant:" << jv.toVariant();
+    if (!setValueAtPath(path, jv))
         return false;
 
-    if (!writeSettings())
+    if (!writeSettings()) {
+        qDebug() << "[SettingsManager] writeSettings FAILED for" << path;
         return false;
+    }
 
+    qDebug() << "[SettingsManager] written OK for" << path
+             << "verify:" << valueAtPath(path);
     return true;
+}
+
+QString SettingsManager::importSettingsFromFile()
+{
+    QString startDir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (startDir.isEmpty())
+        startDir = QDir::homePath();
+
+    const QString selectedFile = QFileDialog::getOpenFileName(
+        activeDialogParent(),
+        QStringLiteral("Import Settings"),
+        startDir,
+        QStringLiteral("JSON Files (*.json);;All Files (*.*)"));
+
+    if (selectedFile.isEmpty())
+        return {};
+
+    const QJsonObject importedSettings = readJsonFile(selectedFile);
+    if (importedSettings.isEmpty()) {
+        QMessageBox::warning(activeDialogParent(),
+                             QStringLiteral("Import Failed"),
+                             QStringLiteral("The selected file did not contain a valid settings object."));
+        return {};
+    }
+
+    QJsonObject defaults = readJsonFile(defaultSettingsPath());
+    if (defaults.isEmpty())
+        defaults = builtInDefaults();
+
+    m_settings = mergeObjects(defaults, importedSettings);
+    if (!writeSettings()) {
+        QMessageBox::warning(activeDialogParent(),
+                             QStringLiteral("Import Failed"),
+                             QStringLiteral("Ghost could not write the imported settings to disk."));
+        return {};
+    }
+
+    return selectedFile;
 }
 
 QString SettingsManager::getSitePermissionRulesJson() const
@@ -179,7 +302,7 @@ QString SettingsManager::chooseDownloadPath()
     }
 
     const QString selectedPath = QFileDialog::getExistingDirectory(
-        nullptr,
+        activeDialogParent(),
         QStringLiteral("Choose Download Folder"),
         currentPath);
 
@@ -190,6 +313,57 @@ QString SettingsManager::chooseDownloadPath()
         return {};
 
     return selectedPath;
+}
+
+bool SettingsManager::openDefaultAppsSettings()
+{
+#ifdef Q_OS_WIN
+    const HINSTANCE result = ShellExecuteW(nullptr,
+                                           L"open",
+                                           L"ms-settings:defaultapps",
+                                           nullptr,
+                                           nullptr,
+                                           SW_SHOWNORMAL);
+    return reinterpret_cast<INT_PTR>(result) > 32;
+#else
+    return false;
+#endif
+}
+
+QString SettingsManager::getDefaultBrowserStatus() const
+{
+#ifdef Q_OS_WIN
+    const QFileInfo exeInfo(QCoreApplication::applicationFilePath());
+    const QString currentExe = (exeInfo.canonicalFilePath().isEmpty() ? exeInfo.absoluteFilePath() : exeInfo.canonicalFilePath()).toLower();
+    if (currentExe.isEmpty())
+        return QStringLiteral("unknown");
+
+    const auto statusForScheme = [&](const QString &scheme) -> QString {
+        const QString userChoiceKey = QStringLiteral("Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\")
+            + scheme + QStringLiteral("\\UserChoice");
+        const QString progId = readRegistryString(HKEY_CURRENT_USER, userChoiceKey, L"ProgId");
+        if (progId.isEmpty())
+            return QStringLiteral("unknown");
+
+        const QString command = commandForProgId(progId);
+        if (command.isEmpty())
+            return QStringLiteral("unknown");
+
+        return executablePathFromCommand(command) == currentExe
+            ? QStringLiteral("default")
+            : QStringLiteral("not-default");
+    };
+
+    const QString httpStatus = statusForScheme(QStringLiteral("http"));
+    const QString httpsStatus = statusForScheme(QStringLiteral("https"));
+    if (httpStatus == QLatin1String("default") && httpsStatus == QLatin1String("default"))
+        return QStringLiteral("default");
+    if (httpStatus == QLatin1String("unknown") || httpsStatus == QLatin1String("unknown"))
+        return QStringLiteral("unknown");
+    return QStringLiteral("not-default");
+#else
+    return QStringLiteral("unsupported");
+#endif
 }
 
 bool SettingsManager::resetToDefaults()
@@ -227,14 +401,19 @@ QJsonObject SettingsManager::builtInDefaults() const
             { QStringLiteral("startupBehavior"), QStringLiteral("newTab") },
             { QStringLiteral("homePage"), QStringLiteral("ghost://newtab") },
             { QStringLiteral("searchEngine"), QStringLiteral("duckduckgo") },
+            { QStringLiteral("profileName"), QStringLiteral("Ghost User") },
+            { QStringLiteral("newTabModules"), QJsonObject {
+                { QStringLiteral("weather"), true },
+                { QStringLiteral("shortcuts"), true },
+                { QStringLiteral("briefing"), true },
+                { QStringLiteral("focus"), true },
+            } },
         } },
         { QStringLiteral("appearance"), QJsonObject {
             { QStringLiteral("theme"), QStringLiteral("dark") },
             { QStringLiteral("showBookmarksBar"), false },
             { QStringLiteral("fontSize"), 16 },
             { QStringLiteral("zoomLevel"), 100 },
-            { QStringLiteral("statusOverlayMode"), QStringLiteral("frosted") },
-            { QStringLiteral("statusOverlayOpacity"), 42 },
         } },
         { QStringLiteral("content"), QJsonObject {
             { QStringLiteral("autoplay"), true },
@@ -316,17 +495,23 @@ QJsonObject SettingsManager::readJsonFile(const QString &path) const
 bool SettingsManager::writeJsonFile(const QString &path, const QJsonObject &object) const
 {
     QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qDebug() << "[SettingsManager] writeJsonFile OPEN FAILED:" << path << file.errorString();
         return false;
+    }
 
-    file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    const qint64 bytes = file.write(QJsonDocument(object).toJson(QJsonDocument::Indented));
+    qDebug() << "[SettingsManager] writeJsonFile wrote" << bytes << "bytes to" << path;
     return true;
 }
 
 bool SettingsManager::writeSettings()
 {
-    if (!writeJsonFile(userSettingsPath(), m_settings))
+    qDebug() << "[SettingsManager] writeSettings -> path:" << userSettingsPath();
+    if (!writeJsonFile(userSettingsPath(), m_settings)) {
+        qDebug() << "[SettingsManager] writeSettings FAILED";
         return false;
+    }
 
     emit settingsChanged(getSettingsJson());
     return true;

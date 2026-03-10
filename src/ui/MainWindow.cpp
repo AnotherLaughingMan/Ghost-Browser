@@ -1,22 +1,30 @@
 #include "MainWindow.h"
+#include <QShortcut>
 
 #include "browser/FingerprintingProtection.h"
 #include "browser/GhostRequestInterceptor.h"
+#include "core/BookmarkManager.h"
 #include "core/CookieManager.h"
 #include "core/HistoryManager.h"
 #include "core/ProtectionDiagnostics.h"
 #include "core/SettingsManager.h"
 #include "core/WeatherService.h"
+#include "ui/LoadingCurtainWidget.h"
+#include "ui/StatusBubbleWidget.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QAbstractButton>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QDir>
+#include <QDockWidget>
 #include <QFile>
 #include <QFileDialog>
 #include <QEvent>
-#include <QGraphicsDropShadowEffect>
+#include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QHash>
@@ -28,9 +36,14 @@
 #include <QCheckBox>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMainWindow>
 #include <QMenu>
 #include <QMessageBox>
+#include <QInputDialog>
 #include <QMouseEvent>
+#include <QPointer>
+#include <QGraphicsOpacityEffect>
+#include <QPropertyAnimation>
 #include <QNetworkProxy>
 #include <QNetworkProxyFactory>
 #include <QRegularExpression>
@@ -51,6 +64,7 @@
 #include <QWebChannel>
 #include <QWebEngineCookieStore>
 #include <QWebEngineDownloadRequest>
+#include <QWebEngineFullScreenRequest>
 #include <QWebEngineHistory>
 #include <QWebEngineProfile>
 #include <QWebEnginePage>
@@ -63,6 +77,21 @@
 #endif
 
 namespace {
+
+#ifdef Q_OS_WIN
+void applyWindowsSnapStyles(HWND hwnd)
+{
+    if (!hwnd)
+        return;
+
+    LONG_PTR style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    style |= WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_THICKFRAME | WS_CAPTION | WS_SYSMENU;
+    SetWindowLongPtrW(hwnd, GWL_STYLE, style);
+
+    SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+#endif
 
 QString permissionTypeLabel(const QString &permissionType)
 {
@@ -103,8 +132,67 @@ QWebEnginePage::PermissionPolicy policyForValue(const QString &value)
     return QWebEnginePage::PermissionUnknown;
 }
 
-QString overlayScrollbarScriptSource(bool darkMode)
+bool isVideoHeavyHost(const QString &host)
 {
+    return host == QLatin1String("youtube.com")
+        || host == QLatin1String("www.youtube.com")
+        || host == QLatin1String("m.youtube.com")
+        || host == QLatin1String("youtu.be")
+        || host == QLatin1String("twitch.tv")
+        || host == QLatin1String("www.twitch.tv")
+        || host == QLatin1String("vimeo.com")
+        || host == QLatin1String("www.vimeo.com")
+        || host == QLatin1String("player.vimeo.com")
+        || host == QLatin1String("netflix.com")
+        || host == QLatin1String("www.netflix.com")
+        || host == QLatin1String("primevideo.com")
+        || host == QLatin1String("www.primevideo.com")
+        || host == QLatin1String("hulu.com")
+        || host == QLatin1String("www.hulu.com")
+        || host == QLatin1String("disneyplus.com")
+        || host == QLatin1String("www.disneyplus.com");
+}
+
+bool isBookmarkableUrl(const QUrl &url)
+{
+    if (!url.isValid() || url.scheme().isEmpty())
+        return false;
+
+    if (url.scheme() == QLatin1String("qrc"))
+        return false;
+
+    if (url.scheme() == QLatin1String("about") && url.path() == QLatin1String("blank"))
+        return false;
+
+    return true;
+}
+
+bool shouldInjectOverlayScrollbarScript(const QUrl &url)
+{
+    if (!url.isValid()
+        || (url.scheme() == QLatin1String("qrc")
+            && url.path().startsWith(QLatin1String("/pages/")))) {
+        return true;
+    }
+
+    return !isVideoHeavyHost(url.host().toLower());
+}
+
+QString overlayScrollbarScriptSource(bool darkMode, bool enabled)
+{
+        if (!enabled) {
+            return QStringLiteral(R"JS((() => {
+    const root = document.documentElement;
+    if (!root)
+        return;
+
+    root.classList.remove('ghost-scrollbar-hover');
+    const style = document.getElementById('__ghost_overlay_scrollbars');
+    if (style)
+        style.remove();
+})();)JS");
+        }
+
         const QString thumb = darkMode ? QStringLiteral("rgba(164, 177, 217, 0.62)") : QStringLiteral("rgba(107, 120, 151, 0.55)");
         const QString thumbHover = darkMode ? QStringLiteral("rgba(199, 210, 243, 0.84)") : QStringLiteral("rgba(75, 88, 119, 0.78)");
 
@@ -231,6 +319,54 @@ QString accessibilityScriptSource(bool highContrast, bool darkMode)
         .arg(darkMode ? QStringLiteral("1.04") : QStringLiteral("1.02"));
 }
 
+QString internalPageFontSizeScriptSource(int fontSize)
+{
+    const double scale = qMax(0.75, static_cast<double>(fontSize > 0 ? fontSize : 16) / 16.0);
+
+    return QStringLiteral(R"JS((() => {
+    const root = document.documentElement;
+    const body = document.body;
+    if (!root || !body)
+        return;
+
+    const scale = %1;
+    const elements = [body, ...body.querySelectorAll('*')];
+    for (const element of elements) {
+        if (!(element instanceof HTMLElement))
+            continue;
+
+        const storedBase = Number.parseFloat(element.dataset.ghostBaseFontSize || '');
+        const baseFontSize = Number.isFinite(storedBase)
+            ? storedBase
+            : Number.parseFloat(window.getComputedStyle(element).fontSize || '');
+
+        if (!Number.isFinite(baseFontSize) || baseFontSize <= 0)
+            continue;
+
+        if (!element.dataset.ghostBaseFontSize)
+            element.dataset.ghostBaseFontSize = String(baseFontSize);
+
+        const scaledFontSize = Math.max(10, Math.round(baseFontSize * scale * 100) / 100);
+        element.style.fontSize = `${scaledFontSize}px`;
+    }
+})();)JS")
+        .arg(QString::number(scale, 'f', 4));
+}
+
+QString internalPageZoomScriptSource(int zoomLevel)
+{
+    const double scale = qMax(0.25, static_cast<double>(zoomLevel > 0 ? zoomLevel : 100) / 100.0);
+
+    return QStringLiteral(R"JS((() => {
+    const root = document.documentElement;
+    if (!root)
+        return;
+
+    root.style.zoom = String(%1);
+})();)JS")
+        .arg(QString::number(scale, 'f', 4));
+}
+
 QString displayUrlForUi(const QUrl &url)
 {
     if (!url.isValid())
@@ -254,20 +390,46 @@ bool isInternalGhostPage(const QUrl &url)
         && url.path().startsWith(QLatin1String("/pages/"));
 }
 
-QString statusStateForUrl(const QUrl &url)
+QString mediaReadyProbeScriptSource()
 {
-    if (!url.isValid())
-        return QStringLiteral("Idle");
-    if (isInternalGhostPage(url))
-        return QStringLiteral("Internal Page");
-    if (url.scheme() == QLatin1String("https"))
-        return QStringLiteral("Secure");
-    if (url.scheme() == QLatin1String("http"))
-        return QStringLiteral("Insecure");
+    return QStringLiteral(R"JS((() => {
+    const videos = Array.from(document.querySelectorAll('video'));
+    if (!videos.length)
+        return false;
 
-    return url.scheme().isEmpty()
-        ? QStringLiteral("Idle")
-        : url.scheme().toUpper();
+    return videos.some((video) => {
+        if (!video)
+            return false;
+
+        const hasRenderableFrame = video.readyState >= 2;
+        const hasKnownSource = Boolean(video.currentSrc || video.src);
+        const hasBufferedData = Boolean(video.buffered && video.buffered.length > 0);
+        return hasRenderableFrame || (hasKnownSource && hasBufferedData);
+    });
+})())JS");
+}
+
+QColor loadingSurfaceColor(bool darkMode, bool highContrast, bool internalPage)
+{
+    if (internalPage) {
+        return darkMode
+            ? (highContrast ? QColor(0x08, 0x0A, 0x10) : QColor(0x1E, 0x1E, 0x2E))
+            : (highContrast ? QColor(0xFF, 0xFF, 0xFF) : QColor(0xF3, 0xF5, 0xF9));
+    }
+
+    return darkMode
+        ? (highContrast ? QColor(0x19, 0x1C, 0x22) : QColor(0x2B, 0x30, 0x38))
+        : (highContrast ? QColor(0xE7, 0xEA, 0xEF) : QColor(0xD8, 0xDE, 0xE6));
+}
+
+LoadingCurtainWidget *loadingCurtainForView(QWebEngineView *view)
+{
+    return view ? view->findChild<LoadingCurtainWidget *>(QStringLiteral("loadingCurtain")) : nullptr;
+}
+
+QTimer *mediaReadyPollTimerForView(QWebEngineView *view)
+{
+    return view ? view->findChild<QTimer *>(QStringLiteral("mediaReadyPollTimer")) : nullptr;
 }
 
 }
@@ -278,8 +440,12 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowFlags(Qt::FramelessWindowHint | Qt::Window);
+#ifdef Q_OS_WIN
+    applyWindowsSnapStyles(reinterpret_cast<HWND>(winId()));
+#endif
     resize(1280, 800);
     m_settings = new SettingsManager(this);
+    m_bookmarks = new BookmarkManager(this);
     m_history  = new HistoryManager(this);
     m_protectionDiagnostics = new ProtectionDiagnostics(this);
     m_weatherService = new WeatherService(this);
@@ -320,6 +486,21 @@ MainWindow::MainWindow(QWidget *parent)
     trackMouseForResize(m_contentArea);
     trackMouseForResize(m_pageStack);
 
+    m_fullScreenExitShortcut = new QShortcut(QKeySequence(Qt::Key_Escape), this);
+    m_fullScreenExitShortcut->setContext(Qt::ApplicationShortcut);
+    connect(m_fullScreenExitShortcut, &QShortcut::activated, this, [this]() {
+        if (m_fullScreenView)
+            exitVideoFullScreen();
+    });
+
+    m_devToolsShortcut = new QShortcut(QKeySequence(Qt::Key_F12), this);
+    m_devToolsShortcut->setContext(Qt::ApplicationShortcut);
+    connect(m_devToolsShortcut, &QShortcut::activated, this, &MainWindow::toggleDevTools);
+
+    m_devToolsAlternateShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), this);
+    m_devToolsAlternateShortcut->setContext(Qt::ApplicationShortcut);
+    connect(m_devToolsAlternateShortcut, &QShortcut::activated, this, &MainWindow::toggleDevTools);
+
     connect(m_settings, &SettingsManager::settingsChanged, this, [this](const QString &) {
         applyAppearanceSettings();
         applyContentSettings();
@@ -329,6 +510,7 @@ MainWindow::MainWindow(QWidget *parent)
         applySystemSettings();
         saveSessionState();
     });
+    connect(m_bookmarks, &BookmarkManager::bookmarksChanged, this, &MainWindow::refreshBookmarksBar);
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
             this, [this](Qt::ColorScheme) {
                 if (m_settings->value(QStringLiteral("appearance.theme")).toString() == QLatin1String("system"))
@@ -353,6 +535,7 @@ MainWindow::MainWindow(QWidget *parent)
     applyDownloadSettings();
     applySystemSettings();
     applyStyles();
+    refreshBookmarksBar();
     restoreWindowPlacement();
 
     auto *tabStateTimer = new QTimer(this);
@@ -370,6 +553,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     if (!restoreSessionState())
         addTab(startupPageUrl());
+
+    restoreDevToolsState();
+    updateDevToolsActions();
 
     applyAppearanceSettings();
     refreshStatusBar();
@@ -400,6 +586,7 @@ void MainWindow::buildTitleBar()
     m_tabBar->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
     m_tabBar->setIconSize(QSize(16, 16));
     m_tabBar->setUsesScrollButtons(true);
+    m_tabBar->installEventFilter(this);
 
     connect(m_tabBar, &QTabBar::currentChanged, this, &MainWindow::switchTab);
     connect(m_tabBar, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
@@ -485,7 +672,12 @@ void MainWindow::buildNavBar()
     m_urlBar = new QLineEdit(m_navBar);
     m_urlBar->setObjectName("urlBar");
     m_urlBar->setPlaceholderText("Search or enter URL...");
+    m_urlBar->installEventFilter(this);
     connect(m_urlBar, &QLineEdit::returnPressed, this, &MainWindow::navigateToUrl);
+
+    m_siteInfoBtn = makeNavBtn("lock", "Site info and permissions");
+    m_siteInfoBtn->setObjectName("siteInfoBtn");
+    connect(m_siteInfoBtn, &QToolButton::clicked, this, &MainWindow::showSiteInfoPopup);
 
     m_menuBtn = makeNavBtn("menu", "Menu");
     m_menuBtn->setObjectName("menuBtn");
@@ -495,20 +687,56 @@ void MainWindow::buildNavBar()
     menu->setObjectName("mainMenu");
     menu->addAction("New Tab",      this, &MainWindow::addNewTab);
     menu->addSeparator();
+    m_addBookmarkAction = menu->addAction("Bookmark This Page", this, &MainWindow::addCurrentPageBookmark);
+    m_editBookmarkAction = menu->addAction("Edit Current Bookmark...", this, &MainWindow::editCurrentPageBookmark);
+    m_removeBookmarkAction = menu->addAction("Remove Current Bookmark", this, &MainWindow::removeCurrentPageBookmark);
+    menu->addSeparator();
     menu->addAction("Settings",     this, &MainWindow::openSettings);
     menu->addAction("History",      this, []{});
-    menu->addAction("Bookmarks",    this, []{});
+    menu->addAction("Bookmarks",    this, [this]() { openSettingsFragment(QStringLiteral("bookmarks")); });
     menu->addAction("Downloads",    this, []{});
     menu->addSeparator();
+    menu->addAction("Import Bookmarks...", this, &MainWindow::importBookmarks);
+    menu->addAction("Export Bookmarks...", this, &MainWindow::exportBookmarks);
+    menu->addSeparator();
+    auto *devToolsMenu = menu->addMenu("Developer Tools");
+    m_devToolsAction = devToolsMenu->addAction("Show Developer Tools", this, &MainWindow::toggleDevTools);
+    auto *devToolsPlacementGroup = new QActionGroup(devToolsMenu);
+    devToolsPlacementGroup->setExclusive(true);
+    devToolsMenu->addSeparator();
+    m_devToolsDockBottomAction = devToolsMenu->addAction("Dock Bottom");
+    m_devToolsDockLeftAction = devToolsMenu->addAction("Dock Left");
+    m_devToolsDockRightAction = devToolsMenu->addAction("Dock Right");
+    m_devToolsDetachedAction = devToolsMenu->addAction("Detached Window");
+
+    for (QAction *action : {m_devToolsDockBottomAction, m_devToolsDockLeftAction, m_devToolsDockRightAction, m_devToolsDetachedAction}) {
+        action->setCheckable(true);
+        devToolsPlacementGroup->addAction(action);
+    }
+
+    connect(m_devToolsDockBottomAction, &QAction::triggered, this, [this]() {
+        setDevToolsPlacement(DevToolsPlacement::BottomDock);
+    });
+    connect(m_devToolsDockLeftAction, &QAction::triggered, this, [this]() {
+        setDevToolsPlacement(DevToolsPlacement::LeftDock);
+    });
+    connect(m_devToolsDockRightAction, &QAction::triggered, this, [this]() {
+        setDevToolsPlacement(DevToolsPlacement::RightDock);
+    });
+    connect(m_devToolsDetachedAction, &QAction::triggered, this, [this]() {
+        setDevToolsPlacement(DevToolsPlacement::Detached);
+    });
     menu->addAction("Codec Test",   this, &MainWindow::openCodecTest);
     menu->addSeparator();
     menu->addAction("Exit",         this, &MainWindow::onClose);
+    connect(menu, &QMenu::aboutToShow, this, &MainWindow::refreshBookmarkMenuActions);
     m_menuBtn->setMenu(menu);
 
     layout->addWidget(m_backBtn);
     layout->addWidget(m_forwardBtn);
     layout->addWidget(m_reloadBtn);
     layout->addWidget(m_homeBtn);
+    layout->addWidget(m_siteInfoBtn);
     layout->addWidget(m_urlBar, 1);
     layout->addWidget(m_menuBtn);
 }
@@ -522,54 +750,48 @@ void MainWindow::buildBookmarksBar()
     layout->setContentsMargins(8, 4, 8, 4);
     layout->setSpacing(6);
 
-    auto makeBookmark = [&](const QString &text, const std::function<void()> &handler) {
-        auto *button = new QToolButton(m_bookmarksBar);
-        button->setObjectName("bookmarkBtn");
-        button->setText(text);
-        button->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        connect(button, &QToolButton::clicked, this, handler);
-        layout->addWidget(button);
-        return button;
-    };
+    layout->addStretch(1);
+}
 
-    makeBookmark(QStringLiteral("Home"), [this]() { goHome(); });
-    makeBookmark(QStringLiteral("Settings"), [this]() { openSettings(); });
-    makeBookmark(QStringLiteral("Codec Test"), [this]() { openCodecTest(); });
+void MainWindow::refreshBookmarksBar()
+{
+    if (!m_bookmarksBar)
+        return;
+
+    auto *layout = qobject_cast<QHBoxLayout *>(m_bookmarksBar->layout());
+    if (!layout)
+        return;
+
+    while (layout->count() > 0) {
+        QLayoutItem *item = layout->takeAt(0);
+        if (QWidget *widget = item->widget())
+            widget->deleteLater();
+        delete item;
+    }
+
+    if (m_bookmarks) {
+        for (const BookmarkEntry &entry : m_bookmarks->entries()) {
+            auto *button = new QToolButton(m_bookmarksBar);
+            button->setObjectName("bookmarkBtn");
+            button->setText(entry.title);
+            button->setToolTip(entry.url.toString());
+            button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+            connect(button, &QToolButton::clicked, this, [this, entry]() {
+                if (auto *view = currentWebView())
+                    view->setUrl(entry.url);
+                else
+                    addTab(entry.url, entry.title);
+            });
+            layout->addWidget(button);
+        }
+    }
+
     layout->addStretch(1);
 }
 
 void MainWindow::buildStatusBar()
 {
-    m_statusBar = new QWidget(m_contentArea);
-    m_statusBar->setObjectName("statusBar");
-    m_statusBar->setFixedHeight(28);
-    m_statusBar->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_statusBar->setAttribute(Qt::WA_StyledBackground, true);
-    m_statusBar->setAutoFillBackground(false);
-
-    m_statusOverlayBackdrop = new QWidget(m_statusBar);
-    m_statusOverlayBackdrop->setObjectName(QStringLiteral("statusOverlayBackdrop"));
-    m_statusOverlayBackdrop->setAttribute(Qt::WA_TransparentForMouseEvents, true);
-    m_statusOverlayBackdrop->lower();
-
-    auto *layout = new QHBoxLayout(m_statusBar);
-    layout->setContentsMargins(12, 4, 12, 4);
-    layout->setSpacing(8);
-
-    m_statusLabel = new QLabel(QStringLiteral("Ready"), m_statusBar);
-    m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
-    m_statusLabel->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    m_statusLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
-
-    m_statusStateLabel = new QLabel(QStringLiteral("Idle"), m_statusBar);
-    m_statusStateLabel->setObjectName(QStringLiteral("statusStateLabel"));
-    m_statusStateLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-
-    layout->addWidget(m_statusLabel, 1);
-    layout->addWidget(m_statusStateLabel);
-
-    m_statusBar->raise();
-    updateStatusOverlayGeometry();
+    m_statusBar = new StatusBubbleWidget(m_contentArea);
 }
 
 // ── Content ───────────────────────────────────────────────────
@@ -604,7 +826,6 @@ void MainWindow::addTab(const QUrl &url, const QString &label)
 
     m_hoveredLink.clear();
     refreshStatusBar();
-    ensureStatusOverlayOnTop();
 }
 
 // ── Styles ────────────────────────────────────────────────────
@@ -631,6 +852,12 @@ void MainWindow::applyStyles()
         ? (highContrast ? QStringLiteral("#F4F7FF") : QStringLiteral("#3A3A4A"))
         : (highContrast ? QStringLiteral("#212734") : QStringLiteral("#D9DFEA"));
     const QString accent = highContrast ? QStringLiteral("#FFC440") : QStringLiteral("#5B5FC7");
+    const QString bubbleBackground = m_darkMode
+        ? (highContrast ? QStringLiteral("rgba(10, 12, 16, 150)") : QStringLiteral("rgba(18, 20, 28, 104)"))
+        : (highContrast ? QStringLiteral("rgba(255, 255, 255, 170)") : QStringLiteral("rgba(248, 250, 255, 132)"));
+    const QString bubbleText = m_darkMode
+        ? (highContrast ? QStringLiteral("#FFFFFF") : QStringLiteral("#E8ECF5"))
+        : (highContrast ? QStringLiteral("#0A0C10") : QStringLiteral("#1F2430"));
 
     setStyleSheet(QStringLiteral(R"(
         #titleBar {
@@ -664,7 +891,7 @@ void MainWindow::applyStyles()
             subcontrol-position: right;
             padding: 2px;
         }
-        #newTabBtn, #navBtn, #menuBtn {
+        #newTabBtn, #navBtn, #menuBtn, #siteInfoBtn {
             background: transparent;
             border: none;
             border-radius: 4px;
@@ -682,7 +909,7 @@ void MainWindow::applyStyles()
             image: none;
             width: 0px;
         }
-        #newTabBtn:hover, #navBtn:hover, #menuBtn:hover {
+        #newTabBtn:hover, #navBtn:hover, #menuBtn:hover, #siteInfoBtn:hover {
             background: rgba(91,95,199,0.14);
         }
         #winMinBtn, #winMaxBtn {
@@ -733,25 +960,33 @@ void MainWindow::applyStyles()
         #pageStack {
             background: %1;
         }
-        #statusBar {
+        #statusBubble {
+            background: %9;
+            border: none;
+            border-radius: 7px;
+        }
+        #statusBubbleLabel {
+            color: %11;
+            font-size: 11px;
             background: transparent;
         }
-        #statusOverlayBackdrop {
-            border-radius: 10px;
+        #fullScreenExitBtn {
+            background: rgba(16, 18, 24, 0.58);
+            border: none;
+            border-radius: 17px;
+            padding: 8px;
         }
-        #statusLabel {
-            color: %3;
-            font-size: 11px;
-            padding-right: 8px;
-            background: transparent;
+        #fullScreenExitBtn:hover {
+            background: rgba(232, 17, 35, 0.82);
         }
-        #statusStateLabel {
-            color: %4;
-            font-size: 11px;
+        #fullScreenExitHint {
+            background: rgba(16, 18, 24, 0.72);
+            color: #F5F7FA;
+            border: none;
+            border-radius: 11px;
+            padding: 7px 14px;
+            font-size: 12px;
             font-weight: 600;
-            padding-left: 8px;
-            border-left: 1px solid %8;
-            background: transparent;
         }
         #mainMenu {
             background: %2;
@@ -779,7 +1014,9 @@ void MainWindow::applyStyles()
         .arg(accent)
         .arg(surfaceHover)
         .arg(iconPath(QStringLiteral("x")))
-        .arg(border));
+        .arg(border)
+        .arg(bubbleBackground)
+        .arg(bubbleText));
 }
 
 void MainWindow::applyAppearanceSettings()
@@ -798,74 +1035,6 @@ void MainWindow::applyAppearanceSettings()
 
     refreshIcons();
     applyStyles();
-
-    if (m_statusBar && m_statusOverlayBackdrop) {
-        QString mode = m_settings->value(QStringLiteral("appearance.statusOverlayMode")).toString().trimmed();
-        if (mode.isEmpty())
-            mode = QStringLiteral("frosted");
-        const int configuredOpacity = m_settings->value(QStringLiteral("appearance.statusOverlayOpacity")).toInt();
-        const int opacity = qBound(0, configuredOpacity, 100);
-        const bool isOff = mode == QLatin1String("off");
-        m_statusBar->setVisible(!isOff);
-
-        QColor fillColor = m_darkMode ? QColor(20, 25, 39) : QColor(255, 255, 255);
-        QColor borderColor = m_darkMode ? QColor(156, 170, 211) : QColor(175, 184, 203);
-        QString backdropStyle;
-        auto *shadow = qobject_cast<QGraphicsDropShadowEffect *>(m_statusOverlayBackdrop->graphicsEffect());
-        if (!shadow) {
-            shadow = new QGraphicsDropShadowEffect(m_statusOverlayBackdrop);
-            m_statusOverlayBackdrop->setGraphicsEffect(shadow);
-        }
-
-        if (mode == QLatin1String("transparent")) {
-            fillColor.setAlphaF(opacity / 100.0);
-            borderColor.setAlpha(0);
-            backdropStyle = QStringLiteral(
-                "background: %1; border: none; border-radius: 10px;")
-                                .arg(fillColor.name(QColor::HexArgb));
-            shadow->setEnabled(false);
-        } else if (mode == QLatin1String("solid")) {
-            fillColor.setAlpha(255);
-            borderColor.setAlphaF(0.45);
-            backdropStyle = QStringLiteral(
-                "background: %1; border: 1px solid %2; border-radius: 10px;")
-                                .arg(fillColor.name(QColor::HexArgb), borderColor.name(QColor::HexArgb));
-            shadow->setEnabled(false);
-        } else {
-            // Frosted is tuned per theme so light mode stays airy while dark mode reads denser.
-            const QColor topTint = m_darkMode
-                ? QColor(214, 225, 248, qBound(22, opacity / 2 + 18, 54))
-                : QColor(255, 255, 255, qBound(138, opacity + 92, 210));
-            const QColor midTint = m_darkMode
-                ? QColor(42, 52, 80, qBound(156, opacity * 2 + 72, 220))
-                : QColor(244, 248, 255, qBound(170, opacity * 2 + 92, 234));
-            const QColor bottomTint = m_darkMode
-                ? QColor(14, 18, 30, qBound(184, opacity * 2 + 104, 236))
-                : QColor(233, 240, 251, qBound(178, opacity * 2 + 108, 242));
-            backdropStyle = QStringLiteral(
-                "background: qlineargradient(x1:0, y1:0, x2:0, y2:1, "
-                "stop:0 %1, stop:0.42 %2, stop:1 %3); "
-                "border: none; border-radius: 10px;")
-                                .arg(topTint.name(QColor::HexArgb),
-                                     midTint.name(QColor::HexArgb),
-                                     bottomTint.name(QColor::HexArgb));
-            shadow->setBlurRadius(m_darkMode ? 34.0 : 26.0);
-            shadow->setOffset(0.0, m_darkMode ? 6.0 : 4.0);
-            shadow->setColor(QColor(0, 0, 0, m_darkMode ? 132 : 52));
-            shadow->setEnabled(true);
-        }
-
-        if (opacity == 0 && mode != QLatin1String("solid")) {
-            fillColor.setAlpha(0);
-            borderColor.setAlpha(0);
-            backdropStyle = QStringLiteral("background: transparent; border: none; border-radius: 10px;");
-            shadow->setEnabled(false);
-        }
-
-        m_statusOverlayBackdrop->setStyleSheet(backdropStyle);
-        updateStatusOverlayGeometry();
-        m_statusBar->raise();
-    }
 
     for (int i = 0; i < m_pageStack->count(); ++i) {
         if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i))) {
@@ -945,6 +1114,20 @@ void MainWindow::applySystemSettings()
         QNetworkProxy::setApplicationProxy(QNetworkProxy());
     }
 
+    // Hardware acceleration: per-view attributes are applied below via applyViewSettings().
+    // Process-level GPU flags (set in main.cpp) require a restart to change.
+    const bool hwAccel = m_settings->value(QStringLiteral("system.hardwareAcceleration")).toBool();
+    const bool gpuActive = !QCoreApplication::testAttribute(Qt::AA_UseSoftwareOpenGL);
+    if (hwAccel != gpuActive) {
+        static bool alreadyNotified = false;
+        if (!alreadyNotified) {
+            alreadyNotified = true;
+            QMessageBox::information(this,
+                QStringLiteral("Restart Required"),
+                QStringLiteral("Hardware acceleration changes take full effect after restarting Ghost Browser."));
+        }
+    }
+
     for (int i = 0; i < m_pageStack->count(); ++i) {
         if (auto *view = qobject_cast<QWebEngineView *>(m_pageStack->widget(i)))
             applyViewSettings(view);
@@ -981,11 +1164,8 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     const bool javascriptEnabled = siteSettingValue(QStringLiteral("content.siteSettings.javascript"), QStringLiteral("allow")) != QLatin1String("block");
     const bool popupsEnabled = siteSettingValue(QStringLiteral("content.siteSettings.popups"), QStringLiteral("block")) == QLatin1String("allow");
     const bool highContrast = m_settings->value(QStringLiteral("accessibility.highContrast")).toBool();
-    const QColor backgroundColor = isInternalGhostPage(view->url())
-        ? (m_darkMode
-            ? (highContrast ? QColor(0x08, 0x0A, 0x10) : QColor(0x1E, 0x1E, 0x2E))
-            : (highContrast ? QColor(0xFF, 0xFF, 0xFF) : QColor(0xF3, 0xF5, 0xF9)))
-        : QColor(Qt::white);
+    const bool internalPage = isInternalGhostPage(view->url());
+    const QColor backgroundColor = loadingSurfaceColor(m_darkMode, highContrast, internalPage);
 
     view->settings()->setFontSize(QWebEngineSettings::DefaultFontSize, fontSize > 0 ? fontSize : 16);
     view->settings()->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, !autoplayEnabled);
@@ -999,60 +1179,175 @@ void MainWindow::applyViewSettings(QWebEngineView *view)
     const bool hwAccel = m_settings->value(QStringLiteral("system.hardwareAcceleration")).toBool();
     view->settings()->setAttribute(QWebEngineSettings::WebGLEnabled, hwAccel);
     view->settings()->setAttribute(QWebEngineSettings::Accelerated2dCanvasEnabled, hwAccel);
-    view->setZoomFactor((zoomLevel > 0 ? zoomLevel : 100) / 100.0);
+    view->setZoomFactor(internalPage ? 1.0 : (zoomLevel > 0 ? zoomLevel : 100) / 100.0);
+    view->setAttribute(Qt::WA_StyledBackground, true);
+    view->setStyleSheet(QStringLiteral("background: %1;").arg(backgroundColor.name(QColor::HexRgb)));
     view->page()->setBackgroundColor(backgroundColor);
-    view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode));
+    if (auto *loadingCurtain = loadingCurtainForView(view))
+        loadingCurtain->applyTheme(backgroundColor);
+    view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode, shouldInjectOverlayScrollbarScript(view->url())));
     view->page()->runJavaScript(accessibilityScriptSource(highContrast, m_darkMode));
+    if (internalPage) {
+        view->page()->runJavaScript(internalPageZoomScriptSource(zoomLevel));
+        view->page()->runJavaScript(internalPageFontSizeScriptSource(fontSize));
+    }
 }
 
 void MainWindow::refreshStatusBar()
 {
-    if (!m_statusLabel || !m_statusStateLabel)
+    refreshSiteInfoIcon();
+
+    if (!m_statusBar)
+        return;
+
+    if (m_hoveredLink.isEmpty()) {
+        m_statusBar->clear();
+        return;
+    }
+
+    m_statusBar->setHoveredUrl(m_hoveredLink);
+}
+
+void MainWindow::refreshSiteInfoIcon()
+{
+    if (!m_siteInfoBtn)
         return;
 
     const QWebEngineView *view = currentWebView();
-    const QUrl currentUrl = view ? view->url() : QUrl();
-
-    m_statusLabel->setText(m_hoveredLink.isEmpty() ? displayUrlForUi(currentUrl) : m_hoveredLink);
-    m_statusStateLabel->setText(statusStateForUrl(currentUrl));
-    updateStatusOverlayGeometry();
-    ensureStatusOverlayOnTop();
+    const QUrl url = view ? view->url() : QUrl();
+    const bool secure = url.scheme() == QLatin1String("https") || isInternalGhostPage(url);
+    m_siteInfoBtn->setIcon(QIcon(iconPath(secure ? QStringLiteral("lock") : QStringLiteral("unlock"))));
+    m_siteInfoBtn->setToolTip(secure ? QStringLiteral("Connection is secure — click for site permissions")
+                                     : QStringLiteral("Connection is not secure — click for site permissions"));
 }
 
-void MainWindow::ensureStatusOverlayOnTop()
+void MainWindow::showSiteInfoPopup()
 {
-    if (!m_statusBar || !m_statusBar->isVisible())
+    const QWebEngineView *view = currentWebView();
+    if (!view)
         return;
 
-    m_statusBar->raise();
-    QTimer::singleShot(0, this, [this]() {
-        if (m_statusBar && m_statusBar->isVisible())
-            m_statusBar->raise();
+    const QUrl url = view->url();
+    if (!url.isValid() || isInternalGhostPage(url))
+        return;
+
+    const QString origin = url.scheme() + QStringLiteral("://") + url.host();
+    const bool secure = url.scheme() == QLatin1String("https");
+
+    struct PermissionEntry {
+        QString type;
+        QString label;
+        QString settingPath;
+    };
+    const PermissionEntry permissions[] = {
+        { QStringLiteral("notifications"), QStringLiteral("Notifications"), QStringLiteral("content.siteSettings.notifications") },
+        { QStringLiteral("location"),      QStringLiteral("Location"),      QStringLiteral("content.siteSettings.location") },
+        { QStringLiteral("camera"),        QStringLiteral("Camera"),        QStringLiteral("content.siteSettings.camera") },
+        { QStringLiteral("microphone"),    QStringLiteral("Microphone"),    QStringLiteral("content.siteSettings.microphone") },
+    };
+
+    auto *popup = new QDialog(this);
+    popup->setWindowTitle(QStringLiteral("Site Info — %1").arg(url.host()));
+    popup->setWindowFlags(Qt::Popup | Qt::FramelessWindowHint);
+    popup->setAttribute(Qt::WA_DeleteOnClose);
+    popup->setMinimumWidth(320);
+
+    auto *rootLayout = new QVBoxLayout(popup);
+    rootLayout->setContentsMargins(16, 14, 16, 14);
+    rootLayout->setSpacing(10);
+
+    // Connection info
+    auto *connLabel = new QLabel(popup);
+    if (secure) {
+        connLabel->setText(QStringLiteral("<b>%1</b> — <span style='color:#4CAF50;'>Connection is secure</span>").arg(url.host().toHtmlEscaped()));
+    } else {
+        connLabel->setText(QStringLiteral("<b>%1</b> — <span style='color:#FF9800;'>Connection is not secure</span>").arg(url.host().toHtmlEscaped()));
+    }
+    connLabel->setTextFormat(Qt::RichText);
+    rootLayout->addWidget(connLabel);
+
+    // Separator
+    auto *sep = new QFrame(popup);
+    sep->setFrameShape(QFrame::HLine);
+    rootLayout->addWidget(sep);
+
+    // Permission rows
+    auto *permLabel = new QLabel(QStringLiteral("<b>Permissions</b>"), popup);
+    permLabel->setTextFormat(Qt::RichText);
+    rootLayout->addWidget(permLabel);
+
+    struct ComboState {
+        QString type;
+        QComboBox *combo;
+    };
+    QVector<ComboState> comboStates;
+
+    for (const auto &perm : permissions) {
+        auto *row = new QHBoxLayout();
+        row->setSpacing(8);
+
+        auto *label = new QLabel(perm.label, popup);
+        label->setMinimumWidth(100);
+        row->addWidget(label);
+
+        auto *combo = new QComboBox(popup);
+        combo->addItem(QStringLiteral("Default (Ask)"),  QStringLiteral(""));
+        combo->addItem(QStringLiteral("Allow"),           QStringLiteral("allow"));
+        combo->addItem(QStringLiteral("Block"),           QStringLiteral("block"));
+
+        // Current per-site rule
+        const QString currentPolicy = m_settings->sitePermissionRule(perm.type, url).trimmed().toLower();
+        if (currentPolicy == QLatin1String("allow"))
+            combo->setCurrentIndex(1);
+        else if (currentPolicy == QLatin1String("block"))
+            combo->setCurrentIndex(2);
+        else
+            combo->setCurrentIndex(0);
+
+        row->addWidget(combo, 1);
+        rootLayout->addLayout(row);
+
+        comboStates.append({ perm.type, combo });
+    }
+
+    rootLayout->addSpacing(6);
+
+    // Apply button
+    auto *applyBtn = new QPushButton(QStringLiteral("Apply"), popup);
+    rootLayout->addWidget(applyBtn);
+
+    connect(applyBtn, &QPushButton::clicked, popup, [this, popup, comboStates, origin]() {
+        for (const auto &state : comboStates) {
+            const QString policy = state.combo->currentData().toString();
+            if (policy.isEmpty()) {
+                m_settings->removeSitePermissionRule(state.type, origin);
+            } else {
+                m_settings->upsertSitePermissionRule(state.type, origin, policy);
+            }
+        }
+        popup->close();
     });
-}
 
-void MainWindow::updateStatusOverlayGeometry()
-{
-    if (!m_contentArea || !m_pageStack || !m_statusBar || !m_statusOverlayBackdrop)
-        return;
+    // Style the popup based on current theme
+    const QString bg = m_darkMode ? QStringLiteral("#2A2A3C") : QStringLiteral("#FFFFFF");
+    const QString fg = m_darkMode ? QStringLiteral("#E0E0E0") : QStringLiteral("#1F2430");
+    const QString border = m_darkMode ? QStringLiteral("#3A3A4A") : QStringLiteral("#D9DFEA");
+    popup->setStyleSheet(QStringLiteral(
+        "QDialog { background: %1; color: %2; border: 1px solid %3; border-radius: 8px; }"
+        "QLabel { color: %2; background: transparent; }"
+        "QComboBox { background: %1; color: %2; border: 1px solid %3; border-radius: 4px; padding: 4px 8px; }"
+        "QComboBox QAbstractItemView { background: %1; color: %2; border: 1px solid %3; selection-background-color: rgba(91,95,199,0.25); }"
+        "QComboBox::drop-down { border: none; }"
+        "QPushButton { background: #5B5FC7; color: #FFFFFF; border: none; border-radius: 5px; padding: 7px 20px; font-weight: 600; }"
+        "QPushButton:hover { background: #6B6FD7; }"
+        "QFrame { background: %3; }")
+        .arg(bg, fg, border));
 
-    if (!m_statusBar->isVisible())
-        return;
-
-    constexpr int leftInset = 10;
-    constexpr int rightInset = 30;
-    constexpr int bottomInset = 1;
-    constexpr int overlayHeight = 28;
-    const QRect stackRect = m_pageStack->geometry();
-    const int overlayWidth = qMax(220, stackRect.width() - leftInset - rightInset);
-    const QRect overlayRect(stackRect.x() + leftInset,
-                            qMax(stackRect.y(), stackRect.bottom() - overlayHeight - bottomInset + 1),
-                            overlayWidth,
-                            overlayHeight);
-    m_statusBar->setGeometry(overlayRect);
-    m_statusOverlayBackdrop->setGeometry(m_statusBar->rect());
-    m_statusOverlayBackdrop->lower();
-    ensureStatusOverlayOnTop();
+    // Position below the site-info button
+    const QPoint btnPos = m_siteInfoBtn->mapToGlobal(QPoint(0, m_siteInfoBtn->height()));
+    popup->adjustSize();
+    popup->move(btnPos);
+    popup->show();
 }
 
 void MainWindow::applyPerViewContentRules(QWebEngineView *view)
@@ -1087,6 +1382,7 @@ void MainWindow::refreshIcons()
         m_homeBtn->setIcon(QIcon(iconPath(QStringLiteral("home"))));
     if (m_menuBtn)
         m_menuBtn->setIcon(QIcon(iconPath(QStringLiteral("menu"))));
+    refreshSiteInfoIcon();
 }
 
 void MainWindow::trackMouseForResize(QWidget *widget)
@@ -1121,7 +1417,6 @@ void MainWindow::closeTab(int index)
     saveSessionState();
     m_hoveredLink.clear();
     refreshStatusBar();
-    ensureStatusOverlayOnTop();
 }
 
 void MainWindow::switchTab(int index)
@@ -1138,9 +1433,10 @@ void MainWindow::switchTab(int index)
             m_urlBar->setText(url.toString());
     }
 
+    updateDevToolsTarget();
+
     m_hoveredLink.clear();
     refreshStatusBar();
-    ensureStatusOverlayOnTop();
     saveSessionState();
 }
 
@@ -1210,11 +1506,7 @@ void MainWindow::goHome()
 
 void MainWindow::openSettings()
 {
-    QUrl url = resolveInternalUrl(QStringLiteral("settings"));
-    if (auto *view = currentWebView()) {
-        attachSettingsBridge(view);
-        view->setUrl(url);
-    }
+    openSettingsFragment();
 }
 
 void MainWindow::openCodecTest()
@@ -1222,6 +1514,477 @@ void MainWindow::openCodecTest()
     QUrl url = resolveInternalUrl(QStringLiteral("codec-test"));
     if (auto *view = currentWebView())
         view->setUrl(url);
+}
+
+void MainWindow::saveDevToolsState()
+{
+    if (m_restoringDevToolsState)
+        return;
+
+    const bool isDetached = m_devToolsPlacement == DevToolsPlacement::Detached;
+    const bool isOpen = isDetached
+        ? (m_devToolsWindow && m_devToolsWindow->isVisible())
+        : (m_devToolsDock && m_devToolsDock->isVisible());
+
+    QString placement = QStringLiteral("bottom");
+    switch (m_devToolsPlacement) {
+    case DevToolsPlacement::LeftDock:
+        placement = QStringLiteral("left");
+        break;
+    case DevToolsPlacement::RightDock:
+        placement = QStringLiteral("right");
+        break;
+    case DevToolsPlacement::Detached:
+        placement = QStringLiteral("detached");
+        break;
+    case DevToolsPlacement::BottomDock:
+    default:
+        break;
+    }
+
+    // Capture detached window geometry when the window is alive; otherwise preserve
+    // whatever was previously written so the last position survives placement changes.
+    QJsonObject detachedGeo;
+    if (m_devToolsWindow) {
+        const QRect r = m_devToolsWindow->geometry();
+        detachedGeo = {
+            { QStringLiteral("x"),      r.x() },
+            { QStringLiteral("y"),      r.y() },
+            { QStringLiteral("width"),  r.width() },
+            { QStringLiteral("height"), r.height() },
+        };
+    } else {
+        QFile inFile(devtoolsStatePath());
+        if (inFile.open(QIODevice::ReadOnly)) {
+            const QJsonDocument prev = QJsonDocument::fromJson(inFile.readAll());
+            if (prev.isObject())
+                detachedGeo = prev.object().value(QStringLiteral("detachedWindowGeometry")).toObject();
+        }
+    }
+
+    const QJsonObject root {
+        { QStringLiteral("placement"),              placement },
+        { QStringLiteral("open"),                   isOpen },
+        { QStringLiteral("detachedWindowGeometry"), detachedGeo },
+        { QStringLiteral("dockState"),              QString::fromLatin1(saveState().toBase64()) },
+    };
+
+    QFile file(devtoolsStatePath());
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+void MainWindow::restoreDevToolsState()
+{
+    QFile file(devtoolsStatePath());
+    if (!file.open(QIODevice::ReadOnly))
+        return;
+
+    const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+    if (!doc.isObject())
+        return;
+
+    m_restoringDevToolsState = true;
+
+    const QJsonObject root = doc.object();
+
+    const QString placement = root.value(QStringLiteral("placement")).toString().trimmed().toLower();
+    if (placement == QLatin1String("left"))
+        m_devToolsPlacement = DevToolsPlacement::LeftDock;
+    else if (placement == QLatin1String("right"))
+        m_devToolsPlacement = DevToolsPlacement::RightDock;
+    else if (placement == QLatin1String("detached"))
+        m_devToolsPlacement = DevToolsPlacement::Detached;
+    else
+        m_devToolsPlacement = DevToolsPlacement::BottomDock;
+
+    const QJsonObject geoObj = root.value(QStringLiteral("detachedWindowGeometry")).toObject();
+    QRect detachedRect(
+        geoObj.value(QStringLiteral("x")).toInt(),
+        geoObj.value(QStringLiteral("y")).toInt(),
+        geoObj.value(QStringLiteral("width")).toInt(),
+        geoObj.value(QStringLiteral("height")).toInt());
+
+    // Clamp the detached window to an available screen so it is never placed off-screen.
+    if (detachedRect.isValid() && detachedRect.width() >= 320 && detachedRect.height() >= 200) {
+        bool visibleOnAnyScreen = false;
+        for (QScreen *screen : QGuiApplication::screens()) {
+            if (!screen)
+                continue;
+            if (screen->availableGeometry().intersects(detachedRect.adjusted(32, 32, -32, -32))) {
+                visibleOnAnyScreen = true;
+                break;
+            }
+        }
+        if (!visibleOnAnyScreen) {
+            if (QScreen *primary = QGuiApplication::primaryScreen())
+                detachedRect.moveCenter(primary->availableGeometry().center());
+        }
+    } else {
+        detachedRect = QRect(); // invalid — let ensureDevToolsWindow use its defaults
+    }
+
+    if (m_devToolsPlacement == DevToolsPlacement::Detached || detachedRect.isValid()) {
+        ensureDevToolsWindow();
+        if (detachedRect.isValid())
+            m_devToolsWindow->setGeometry(detachedRect);
+    }
+
+    if (m_devToolsPlacement != DevToolsPlacement::Detached)
+        ensureDevToolsDock();
+
+    // Restore dock widget sizes via Qt's dock state mechanism.
+    // Deferred so the window is fully constructed before restoreState() is called.
+    const QString dockStateB64 = root.value(QStringLiteral("dockState")).toString();
+    if (!dockStateB64.isEmpty()) {
+        const QByteArray dockState = QByteArray::fromBase64(dockStateB64.toLatin1());
+        QTimer::singleShot(0, this, [this, dockState]() {
+            restoreState(dockState);
+        });
+    }
+
+    const bool shouldOpen = root.value(QStringLiteral("open")).toBool();
+    if (shouldOpen && currentWebView() && currentWebView()->page()) {
+        setDevToolsPlacement(m_devToolsPlacement);
+    } else {
+        if (m_devToolsDock)
+            m_devToolsDock->hide();
+        if (m_devToolsWindow)
+            m_devToolsWindow->hide();
+    }
+
+    m_restoringDevToolsState = false;
+}
+
+void MainWindow::ensureDevToolsView()
+{
+    if (m_devToolsView && m_devToolsView->page())
+        return;
+
+    auto *devToolsView = new QWebEngineView(this);
+    auto *devToolsPage = new QWebEnginePage(m_profile, devToolsView);
+    devToolsView->setPage(devToolsPage);
+    devToolsView->setObjectName(QStringLiteral("devToolsView"));
+    m_devToolsView = devToolsView;
+}
+
+void MainWindow::ensureDevToolsDock()
+{
+    if (m_devToolsDock)
+        return;
+
+    auto *dock = new QDockWidget(QStringLiteral("Developer Tools"), this);
+    dock->setObjectName(QStringLiteral("devToolsDock"));
+    dock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea);
+    dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+    auto *dockContainer = new QWidget(dock);
+    auto *dockLayout = new QVBoxLayout(dockContainer);
+    dockLayout->setContentsMargins(0, 0, 0, 0);
+    dockLayout->setSpacing(0);
+    dock->setWidget(dockContainer);
+    addDockWidget(Qt::BottomDockWidgetArea, dock);
+    dock->hide();
+
+    connect(dock, &QDockWidget::visibilityChanged, this, [this](bool) {
+        saveDevToolsState();
+        updateDevToolsActions();
+    });
+    connect(dock, &QDockWidget::dockLocationChanged, this, [this](Qt::DockWidgetArea area) {
+        switch (area) {
+        case Qt::LeftDockWidgetArea:
+            m_devToolsPlacement = DevToolsPlacement::LeftDock;
+            break;
+        case Qt::RightDockWidgetArea:
+            m_devToolsPlacement = DevToolsPlacement::RightDock;
+            break;
+        default:
+            m_devToolsPlacement = DevToolsPlacement::BottomDock;
+            break;
+        }
+        saveDevToolsState();
+        updateDevToolsActions();
+    });
+
+    m_devToolsDock = dock;
+}
+
+void MainWindow::ensureDevToolsWindow()
+{
+    if (m_devToolsWindow)
+        return;
+
+    auto *window = new QMainWindow();
+    window->resize(980, 720);
+    window->setWindowTitle(QStringLiteral("Ghost Developer Tools"));
+    auto *windowContainer = new QWidget(window);
+    auto *windowLayout = new QVBoxLayout(windowContainer);
+    windowLayout->setContentsMargins(0, 0, 0, 0);
+    windowLayout->setSpacing(0);
+    window->setCentralWidget(windowContainer);
+    window->installEventFilter(this);
+    connect(window, &QObject::destroyed, this, [this]() {
+        m_devToolsWindow = nullptr;
+        saveDevToolsState();
+        updateDevToolsActions();
+    });
+
+    m_devToolsWindow = window;
+}
+
+void MainWindow::attachDevToolsView(QWidget *container)
+{
+    if (!container || !m_devToolsView)
+        return;
+
+    if (m_devToolsView->parentWidget() == container)
+        return;
+
+    if (auto *currentParent = m_devToolsView->parentWidget()) {
+        if (auto *currentLayout = currentParent->layout())
+            currentLayout->removeWidget(m_devToolsView);
+    }
+
+    if (auto *targetLayout = container->layout()) {
+        m_devToolsView->setParent(container);
+        targetLayout->addWidget(m_devToolsView);
+    }
+}
+
+void MainWindow::setDevToolsPlacement(DevToolsPlacement placement)
+{
+    auto *view = currentWebView();
+    if (!view || !view->page())
+        return;
+
+    ensureDevToolsView();
+    updateDevToolsTarget();
+
+    m_devToolsPlacement = placement;
+
+    if (placement == DevToolsPlacement::Detached) {
+        ensureDevToolsWindow();
+        if (m_devToolsDock)
+            m_devToolsDock->hide();
+
+        attachDevToolsView(m_devToolsWindow->centralWidget());
+
+        m_devToolsWindow->show();
+        m_devToolsWindow->raise();
+        m_devToolsWindow->activateWindow();
+    } else {
+        ensureDevToolsDock();
+        if (m_devToolsWindow)
+            m_devToolsWindow->hide();
+
+        attachDevToolsView(m_devToolsDock->widget());
+
+        Qt::DockWidgetArea area = Qt::BottomDockWidgetArea;
+        if (placement == DevToolsPlacement::LeftDock)
+            area = Qt::LeftDockWidgetArea;
+        else if (placement == DevToolsPlacement::RightDock)
+            area = Qt::RightDockWidgetArea;
+
+        addDockWidget(area, m_devToolsDock);
+        m_devToolsDock->show();
+        m_devToolsDock->raise();
+    }
+
+    saveDevToolsState();
+    updateDevToolsActions();
+}
+
+void MainWindow::toggleDevTools()
+{
+    auto *view = currentWebView();
+    if (!view || !view->page())
+        return;
+
+    const bool visible = m_devToolsPlacement == DevToolsPlacement::Detached
+        ? (m_devToolsWindow && m_devToolsWindow->isVisible())
+        : (m_devToolsDock && m_devToolsDock->isVisible());
+
+    if (visible) {
+        if (m_devToolsPlacement == DevToolsPlacement::Detached) {
+            if (m_devToolsWindow)
+                m_devToolsWindow->hide();
+        } else if (m_devToolsDock) {
+            m_devToolsDock->hide();
+        }
+
+        saveDevToolsState();
+        updateDevToolsActions();
+        return;
+    }
+
+    setDevToolsPlacement(m_devToolsPlacement);
+}
+
+void MainWindow::addCurrentPageBookmark()
+{
+    auto *view = currentWebView();
+    if (!view || !m_bookmarks)
+        return;
+
+    const QUrl url = view->url();
+    if (!isBookmarkableUrl(url))
+        return;
+
+    const QString suggestedTitle = view->title().trimmed().isEmpty()
+        ? displayUrlForUi(url)
+        : view->title().trimmed();
+    bool accepted = false;
+    const QString title = QInputDialog::getText(this,
+                                                QStringLiteral("Bookmark This Page"),
+                                                QStringLiteral("Bookmark name:"),
+                                                QLineEdit::Normal,
+                                                suggestedTitle,
+                                                &accepted);
+    if (!accepted)
+        return;
+
+    if (!m_bookmarks->addBookmark(title, url.toString())) {
+        QMessageBox::information(this,
+                                 QStringLiteral("Already Bookmarked"),
+                                 QStringLiteral("This page is already in your bookmarks. Use Edit Current Bookmark if you want to rename it."));
+    }
+}
+
+void MainWindow::editCurrentPageBookmark()
+{
+    auto *view = currentWebView();
+    if (!view || !m_bookmarks)
+        return;
+
+    const QUrl url = view->url();
+    const QString bookmarkId = m_bookmarks->bookmarkIdForUrl(url);
+    if (bookmarkId.isEmpty())
+        return;
+
+    QString currentTitle = view->title().trimmed();
+    for (const BookmarkEntry &entry : m_bookmarks->entries()) {
+        if (entry.id == bookmarkId) {
+            currentTitle = entry.title;
+            break;
+        }
+    }
+
+    bool accepted = false;
+    const QString updatedTitle = QInputDialog::getText(this,
+                                                       QStringLiteral("Edit Current Bookmark"),
+                                                       QStringLiteral("Bookmark name:"),
+                                                       QLineEdit::Normal,
+                                                       currentTitle,
+                                                       &accepted);
+    if (!accepted)
+        return;
+
+    m_bookmarks->updateBookmark(bookmarkId, updatedTitle, url.toString());
+}
+
+void MainWindow::removeCurrentPageBookmark()
+{
+    auto *view = currentWebView();
+    if (!view || !m_bookmarks)
+        return;
+
+    const QString bookmarkId = m_bookmarks->bookmarkIdForUrl(view->url());
+    if (bookmarkId.isEmpty())
+        return;
+
+    const auto answer = QMessageBox::question(this,
+                                              QStringLiteral("Remove Bookmark"),
+                                              QStringLiteral("Remove the bookmark for this page from Ghost?"));
+    if (answer != QMessageBox::Yes)
+        return;
+
+    m_bookmarks->deleteBookmark(bookmarkId);
+}
+
+void MainWindow::importBookmarks()
+{
+    if (m_bookmarks)
+        m_bookmarks->importBookmarksFromFile();
+}
+
+void MainWindow::exportBookmarks()
+{
+    if (m_bookmarks)
+        m_bookmarks->exportBookmarksToFile();
+}
+
+void MainWindow::openSettingsFragment(const QString &fragment)
+{
+    QUrl url = resolveInternalUrl(QStringLiteral("settings"));
+    if (!fragment.trimmed().isEmpty())
+        url.setFragment(fragment.trimmed());
+
+    if (auto *view = currentWebView()) {
+        attachSettingsBridge(view);
+        view->setUrl(url);
+        return;
+    }
+
+    addTab(url, QStringLiteral("Settings"));
+}
+
+void MainWindow::refreshBookmarkMenuActions()
+{
+    if (!m_addBookmarkAction || !m_editBookmarkAction || !m_removeBookmarkAction || !m_bookmarks)
+        return;
+
+    const QWebEngineView *view = currentWebView();
+    const QUrl url = view ? view->url() : QUrl();
+    const bool bookmarkable = isBookmarkableUrl(url);
+    const bool bookmarked = bookmarkable && m_bookmarks->containsUrl(url);
+
+    m_addBookmarkAction->setEnabled(bookmarkable && !bookmarked);
+    m_editBookmarkAction->setEnabled(bookmarkable && bookmarked);
+    m_removeBookmarkAction->setEnabled(bookmarkable && bookmarked);
+
+    updateDevToolsActions();
+}
+
+void MainWindow::updateDevToolsTarget()
+{
+    if (!m_devToolsView || !m_devToolsView->page())
+        return;
+
+    if (auto *view = currentWebView())
+        m_devToolsView->page()->setInspectedPage(view->page());
+}
+
+void MainWindow::updateDevToolsActions()
+{
+    const bool inspectable = currentWebView() && currentWebView()->page();
+    const bool visible = m_devToolsPlacement == DevToolsPlacement::Detached
+        ? (m_devToolsWindow && m_devToolsWindow->isVisible())
+        : (m_devToolsDock && m_devToolsDock->isVisible());
+
+    if (m_devToolsAction) {
+        m_devToolsAction->setEnabled(inspectable);
+        m_devToolsAction->setText(visible
+            ? QStringLiteral("Hide Developer Tools")
+            : QStringLiteral("Show Developer Tools"));
+    }
+
+    if (m_devToolsDockBottomAction) {
+        m_devToolsDockBottomAction->setEnabled(inspectable);
+        m_devToolsDockBottomAction->setChecked(m_devToolsPlacement == DevToolsPlacement::BottomDock);
+    }
+    if (m_devToolsDockLeftAction) {
+        m_devToolsDockLeftAction->setEnabled(inspectable);
+        m_devToolsDockLeftAction->setChecked(m_devToolsPlacement == DevToolsPlacement::LeftDock);
+    }
+    if (m_devToolsDockRightAction) {
+        m_devToolsDockRightAction->setEnabled(inspectable);
+        m_devToolsDockRightAction->setChecked(m_devToolsPlacement == DevToolsPlacement::RightDock);
+    }
+    if (m_devToolsDetachedAction) {
+        m_devToolsDetachedAction->setEnabled(inspectable);
+        m_devToolsDetachedAction->setChecked(m_devToolsPlacement == DevToolsPlacement::Detached);
+    }
 }
 
 // ── URL / title updates ──────────────────────────────────────
@@ -1268,9 +2031,14 @@ void MainWindow::onMaximizeRestore()
 {
     if (isMaximized()) {
         showNormal();
+        // Qt::FramelessWindowHint prevents the OS from tracking the pre-maximize
+        // rect reliably, so we restore it explicitly from our saved copy.
+        if (m_preMaximizeGeometry.isValid())
+            setGeometry(m_preMaximizeGeometry);
         m_maximizeBtn->setIcon(QIcon(iconPath("maximize")));
         m_maximizeBtn->setToolTip("Maximize");
     } else {
+        m_preMaximizeGeometry = geometry();  // capture before OS collapses it
         showMaximized();
         m_maximizeBtn->setIcon(QIcon(iconPath("restore")));
         m_maximizeBtn->setToolTip("Restore");
@@ -1284,12 +2052,341 @@ void MainWindow::onClose()
     close();
 }
 
+void MainWindow::setBrowserChromeVisible(bool visible)
+{
+    m_browserChromeVisible = visible;
+
+    if (m_titleBar)
+        m_titleBar->setVisible(visible);
+    if (m_navBar)
+        m_navBar->setVisible(visible);
+    if (m_bookmarksBar)
+        m_bookmarksBar->setVisible(visible && m_settings->value(QStringLiteral("appearance.showBookmarksBar")).toBool());
+    if (m_statusBar)
+        m_statusBar->setVisible(visible && !m_hoveredLink.isEmpty());
+}
+
+void MainWindow::enterVideoFullScreen(QWebEngineView *view)
+{
+    if (!view)
+        return;
+
+    ensureFullScreenExitButton();
+    ensureFullScreenExitHint();
+    m_fullScreenView = view;
+    m_wasMaximizedBeforeVideoFullScreen = isMaximized();
+    setBrowserChromeVisible(false);
+    showFullScreen();
+    updateFullScreenExitButtonGeometry();
+    updateFullScreenExitHintGeometry();
+    showFullScreenExitHint();
+    view->setFocus();
+}
+
+void MainWindow::exitVideoFullScreen()
+{
+    if (!m_fullScreenView)
+        return;
+
+    if (m_fullScreenExitHideTimer)
+        m_fullScreenExitHideTimer->stop();
+
+    if (m_fullScreenView->page()) {
+        m_fullScreenView->page()->runJavaScript(
+            QStringLiteral("if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); }"));
+    }
+
+    m_fullScreenView.clear();
+    hideFullScreenExitButton();
+    if (isFullScreen()) {
+        if (m_wasMaximizedBeforeVideoFullScreen)
+            showMaximized();
+        else
+            showNormal();
+    }
+
+    setBrowserChromeVisible(true);
+    refreshStatusBar();
+}
+
+void MainWindow::ensureFullScreenExitButton()
+{
+    if (m_fullScreenExitBtn)
+        return;
+
+    m_fullScreenExitBtn = new QToolButton(m_contentArea);
+    m_fullScreenExitBtn->setObjectName(QStringLiteral("fullScreenExitBtn"));
+    m_fullScreenExitBtn->setIcon(QIcon(iconPath(QStringLiteral("x"))));
+    m_fullScreenExitBtn->setIconSize(QSize(24, 24));
+    m_fullScreenExitBtn->setToolTip(QStringLiteral("Exit Fullscreen"));
+    m_fullScreenExitBtn->setCursor(Qt::PointingHandCursor);
+    m_fullScreenExitBtn->hide();
+    m_fullScreenExitBtn->installEventFilter(this);
+    connect(m_fullScreenExitBtn, &QToolButton::clicked, this, &MainWindow::exitVideoFullScreen);
+
+    m_fullScreenExitButtonOpacityEffect = new QGraphicsOpacityEffect(m_fullScreenExitBtn);
+    m_fullScreenExitButtonOpacityEffect->setOpacity(0.0);
+    m_fullScreenExitBtn->setGraphicsEffect(m_fullScreenExitButtonOpacityEffect);
+
+    m_fullScreenExitHideTimer = new QTimer(this);
+    m_fullScreenExitHideTimer->setSingleShot(true);
+    m_fullScreenExitHideTimer->setInterval(850);
+    connect(m_fullScreenExitHideTimer, &QTimer::timeout, this, &MainWindow::hideFullScreenExitButton);
+
+    m_fullScreenExitButtonOpacityAnimation = new QPropertyAnimation(m_fullScreenExitButtonOpacityEffect, "opacity", this);
+    m_fullScreenExitButtonOpacityAnimation->setDuration(150);
+    connect(m_fullScreenExitButtonOpacityAnimation, &QPropertyAnimation::finished, this, [this]() {
+        if (m_fullScreenExitBtn && m_fullScreenExitButtonOpacityEffect
+            && m_fullScreenExitButtonOpacityEffect->opacity() <= 0.0) {
+            m_fullScreenExitBtn->hide();
+        }
+    });
+}
+
+void MainWindow::ensureFullScreenExitHint()
+{
+    if (m_fullScreenExitHintLabel)
+        return;
+
+    m_fullScreenExitHintLabel = new QLabel(QStringLiteral("Exit Fullscreen with ESC"), m_contentArea);
+    m_fullScreenExitHintLabel->setObjectName(QStringLiteral("fullScreenExitHint"));
+    m_fullScreenExitHintLabel->setAlignment(Qt::AlignCenter);
+    m_fullScreenExitHintLabel->adjustSize();
+    m_fullScreenExitHintLabel->hide();
+
+    m_fullScreenExitHintOpacityEffect = new QGraphicsOpacityEffect(m_fullScreenExitHintLabel);
+    m_fullScreenExitHintOpacityEffect->setOpacity(0.0);
+    m_fullScreenExitHintLabel->setGraphicsEffect(m_fullScreenExitHintOpacityEffect);
+
+    m_fullScreenExitHintOpacityAnimation = new QPropertyAnimation(m_fullScreenExitHintOpacityEffect, "opacity", this);
+    m_fullScreenExitHintOpacityAnimation->setDuration(180);
+    connect(m_fullScreenExitHintOpacityAnimation, &QPropertyAnimation::finished, this, [this]() {
+        if (m_fullScreenExitHintLabel && m_fullScreenExitHintOpacityEffect
+            && m_fullScreenExitHintOpacityEffect->opacity() <= 0.0) {
+            m_fullScreenExitHintLabel->hide();
+        }
+    });
+}
+
+void MainWindow::showFullScreenExitButton()
+{
+    if (!m_fullScreenView)
+        return;
+
+    ensureFullScreenExitButton();
+    ensureFullScreenExitHint();
+    if (!m_fullScreenExitBtn)
+        return;
+
+    if (m_fullScreenExitHideTimer)
+        m_fullScreenExitHideTimer->stop();
+
+    updateFullScreenExitButtonGeometry();
+    m_fullScreenExitBtn->show();
+    m_fullScreenExitBtn->raise();
+    if (m_fullScreenExitButtonOpacityAnimation && m_fullScreenExitButtonOpacityEffect) {
+        m_fullScreenExitButtonOpacityAnimation->stop();
+        m_fullScreenExitButtonOpacityAnimation->setStartValue(m_fullScreenExitButtonOpacityEffect->opacity());
+        m_fullScreenExitButtonOpacityAnimation->setEndValue(1.0);
+        m_fullScreenExitButtonOpacityAnimation->start();
+    }
+    showFullScreenExitHint();
+    scheduleFullScreenExitButtonHide();
+}
+
+void MainWindow::showFullScreenExitHint()
+{
+    if (!m_fullScreenView)
+        return;
+
+    ensureFullScreenExitHint();
+    if (!m_fullScreenExitHintLabel)
+        return;
+
+    if (m_fullScreenExitHideTimer)
+        m_fullScreenExitHideTimer->stop();
+
+    updateFullScreenExitHintGeometry();
+    m_fullScreenExitHintLabel->show();
+    m_fullScreenExitHintLabel->raise();
+    if (m_fullScreenExitHintOpacityAnimation && m_fullScreenExitHintOpacityEffect) {
+        m_fullScreenExitHintOpacityAnimation->stop();
+        m_fullScreenExitHintOpacityAnimation->setStartValue(m_fullScreenExitHintOpacityEffect->opacity());
+        m_fullScreenExitHintOpacityAnimation->setEndValue(1.0);
+        m_fullScreenExitHintOpacityAnimation->start();
+    }
+
+    if (m_fullScreenExitHideTimer)
+        m_fullScreenExitHideTimer->start(1600);
+}
+
+void MainWindow::scheduleFullScreenExitButtonHide()
+{
+    const bool buttonVisible = m_fullScreenExitBtn && m_fullScreenExitBtn->isVisible();
+    const bool hintVisible = m_fullScreenExitHintLabel && m_fullScreenExitHintLabel->isVisible();
+    if (!m_fullScreenExitHideTimer || (!buttonVisible && !hintVisible))
+        return;
+
+    if (m_fullScreenExitBtn && m_fullScreenExitBtn->underMouse())
+        return;
+
+    m_fullScreenExitHideTimer->start(850);
+}
+
+void MainWindow::hideFullScreenExitButton()
+{
+    if (m_fullScreenExitBtn) {
+        if (!m_fullScreenExitButtonOpacityAnimation || !m_fullScreenExitButtonOpacityEffect) {
+            m_fullScreenExitBtn->hide();
+        } else {
+            m_fullScreenExitButtonOpacityAnimation->stop();
+            m_fullScreenExitButtonOpacityAnimation->setStartValue(m_fullScreenExitButtonOpacityEffect->opacity());
+            m_fullScreenExitButtonOpacityAnimation->setEndValue(0.0);
+            m_fullScreenExitButtonOpacityAnimation->start();
+        }
+    }
+
+    if (m_fullScreenExitHintLabel) {
+        if (!m_fullScreenExitHintOpacityAnimation || !m_fullScreenExitHintOpacityEffect) {
+            m_fullScreenExitHintLabel->hide();
+        } else {
+            m_fullScreenExitHintOpacityAnimation->stop();
+            m_fullScreenExitHintOpacityAnimation->setStartValue(m_fullScreenExitHintOpacityEffect->opacity());
+            m_fullScreenExitHintOpacityAnimation->setEndValue(0.0);
+            m_fullScreenExitHintOpacityAnimation->start();
+        }
+    }
+}
+
+void MainWindow::updateFullScreenExitButtonGeometry()
+{
+    if (!m_fullScreenExitBtn || !m_contentArea)
+        return;
+
+    const int size = 46;
+    const int topMargin = 12;
+    const int x = (m_contentArea->width() - size) / 2;
+    m_fullScreenExitBtn->setGeometry(x, topMargin, size, size);
+}
+
+void MainWindow::updateFullScreenExitHintGeometry()
+{
+    if (!m_fullScreenExitHintLabel || !m_contentArea)
+        return;
+
+    m_fullScreenExitHintLabel->adjustSize();
+    const QSize size = m_fullScreenExitHintLabel->sizeHint();
+    const int y = 66;
+    const int x = (m_contentArea->width() - size.width()) / 2;
+    m_fullScreenExitHintLabel->setGeometry(x, y, size.width(), size.height());
+}
+
+bool MainWindow::handlePlaybackShortcut(QKeyEvent *event, QWebEngineView *view)
+{
+    if (!event || !view || event->isAutoRepeat())
+        return false;
+
+    if (event->modifiers() != Qt::NoModifier)
+        return false;
+
+    switch (event->key()) {
+    case Qt::Key_Escape:
+        if (m_fullScreenView) {
+            exitVideoFullScreen();
+            event->accept();
+            return true;
+        }
+        return false;
+    default:
+        return false;
+    }
+}
+
 // ── Drag handling (title bar) ────────────────────────────────
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (handlePlaybackShortcut(event, currentWebView()))
+        return;
+
+    if (event && event->key() == Qt::Key_Escape && m_fullScreenView) {
+        exitVideoFullScreen();
+        event->accept();
+        return;
+    }
+
+    QMainWindow::keyPressEvent(event);
+}
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *event)
 {
-    if ((obj == m_pageStack || obj == m_contentArea) && event->type() == QEvent::Resize) {
-        updateStatusOverlayGeometry();
+    if (obj == m_devToolsWindow
+        && (event->type() == QEvent::Close
+            || event->type() == QEvent::Hide
+            || event->type() == QEvent::Show
+            || event->type() == QEvent::Move
+            || event->type() == QEvent::Resize)) {
+        QTimer::singleShot(0, this, [this]() {
+            saveDevToolsState();
+            updateDevToolsActions();
+        });
+    }
+
+    if (obj == m_tabBar && event->type() == QEvent::MouseButtonRelease) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() == Qt::MiddleButton) {
+            const int index = m_tabBar->tabAt(me->position().toPoint());
+            if (index >= 0) {
+                closeTab(index);
+                return true;
+            }
+        }
+    }
+
+    if (obj == m_urlBar && event->type() == QEvent::MouseButtonPress) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() == Qt::MiddleButton) {
+            m_urlBar->clear();
+            m_urlBar->setFocus(Qt::MouseFocusReason);
+            return true;
+        }
+    }
+
+    if (obj == m_fullScreenExitBtn) {
+        if (event->type() == QEvent::Enter) {
+            if (m_fullScreenExitHideTimer)
+                m_fullScreenExitHideTimer->stop();
+        } else if (event->type() == QEvent::Leave) {
+            scheduleFullScreenExitButtonHide();
+        }
+    }
+
+    if (auto *view = qobject_cast<QWebEngineView *>(obj)) {
+        if (event->type() == QEvent::KeyPress && handlePlaybackShortcut(static_cast<QKeyEvent *>(event), view))
+            return true;
+
+        if (m_fullScreenView == view && event->type() == QEvent::MouseMove) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if (me->position().toPoint().y() <= 18)
+                showFullScreenExitButton();
+            else if (m_fullScreenExitBtn && m_fullScreenExitBtn->isVisible() && !m_fullScreenExitBtn->underMouse())
+                scheduleFullScreenExitButtonHide();
+        }
+    }
+
+    if (m_statusBar && (obj == m_contentArea || obj == m_pageStack || qobject_cast<QWebEngineView *>(obj))) {
+        if (event->type() == QEvent::MouseMove) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            m_statusBar->updateCursorPosition(m_contentArea->mapFromGlobal(me->globalPosition().toPoint()), true);
+        } else if (event->type() == QEvent::Leave) {
+            m_statusBar->updateCursorPosition(QPoint(), false);
+        } else if (event->type() == QEvent::Resize && obj == m_contentArea) {
+            m_statusBar->refreshPosition();
+            if (m_fullScreenExitBtn)
+                updateFullScreenExitButtonGeometry();
+                if (m_fullScreenExitHintLabel)
+                    updateFullScreenExitHintGeometry();
+        }
     }
 
 #ifndef Q_OS_WIN
@@ -1339,10 +2436,17 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event)
         } else if (event->type() == QEvent::MouseMove && m_dragging) {
             auto *me = static_cast<QMouseEvent *>(event);
             if (isMaximized()) {
-                // Adjust drag pos proportionally when leaving maximized
+                // Adjust drag pos proportionally when leaving maximized.
+                // width() after showNormal() may still report the maximized width on
+                // frameless windows, so use the saved normal width for the ratio.
+                const int normalWidth = m_preMaximizeGeometry.isValid()
+                                            ? m_preMaximizeGeometry.width()
+                                            : width();
                 const double ratio = static_cast<double>(me->globalPosition().toPoint().x()) / width();
                 showNormal();
-                m_dragPos = QPoint(static_cast<int>(width() * ratio), m_dragPos.y());
+                if (m_preMaximizeGeometry.isValid())
+                    resize(m_preMaximizeGeometry.size());
+                m_dragPos = QPoint(static_cast<int>(normalWidth * ratio), m_dragPos.y());
             }
             move(me->globalPosition().toPoint() - m_dragPos);
             return true;
@@ -1364,7 +2468,7 @@ void MainWindow::changeEvent(QEvent *event)
 
     if (event->type() == QEvent::WindowStateChange) {
         refreshIcons();
-        if (!m_restoringWindowPlacement)
+        if (m_windowPlacementReady && !m_restoringWindowPlacement)
             saveWindowPlacement();
     }
 }
@@ -1372,6 +2476,7 @@ void MainWindow::changeEvent(QEvent *event)
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     saveWindowPlacement();
+    saveDevToolsState();
     saveSessionState();
     clearBrowsingDataIfNeeded();
     QMainWindow::closeEvent(event);
@@ -1381,7 +2486,10 @@ void MainWindow::moveEvent(QMoveEvent *event)
 {
     QMainWindow::moveEvent(event);
 
-    if (!m_restoringWindowPlacement && !isMaximized() && !isMinimized())
+    if (m_statusBar)
+        m_statusBar->refreshPosition();
+
+    if (m_windowPlacementReady && !m_restoringWindowPlacement && !isMaximized() && !isMinimized())
         saveWindowPlacement();
 }
 
@@ -1389,10 +2497,19 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
 
-    updateStatusOverlayGeometry();
+    if (m_statusBar)
+        m_statusBar->refreshPosition();
 
-    if (!m_restoringWindowPlacement && !isMaximized() && !isMinimized())
+    if (m_windowPlacementReady && !m_restoringWindowPlacement && !isMaximized() && !isMinimized())
         saveWindowPlacement();
+}
+
+void MainWindow::showEvent(QShowEvent *event)
+{
+    QMainWindow::showEvent(event);
+
+    if (!m_windowPlacementReady)
+        m_windowPlacementReady = true;
 }
 
 #ifdef Q_OS_WIN
@@ -1411,11 +2528,23 @@ bool MainWindow::nativeEvent(const QByteArray &eventType, void *message, qintptr
         return true;
     }
 
-    if (isMaximized() || isFullScreen() || msg->message != WM_NCHITTEST)
+    if (isFullScreen() || msg->message != WM_NCHITTEST)
         return false;
 
     {
         const POINT cursor = { GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam) };
+
+        if (m_maximizeBtn && m_maximizeBtn->isVisible()) {
+            const QPoint buttonPos = m_maximizeBtn->mapFromGlobal(QPoint(cursor.x, cursor.y));
+            if (m_maximizeBtn->rect().contains(buttonPos)) {
+                *result = HTMAXBUTTON;
+                return true;
+            }
+        }
+
+        if (isMaximized())
+            return false;
+
         const QRect frame = frameGeometry();
         constexpr int resizeMargin = 8;
 
@@ -1469,6 +2598,11 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
     auto *view = new QWebEngineView(m_pageStack);
     auto *page = new QWebEnginePage(m_profile, view);
     view->setPage(page);
+    new LoadingCurtainWidget(view);
+    auto *mediaReadyPollTimer = new QTimer(view);
+    mediaReadyPollTimer->setObjectName(QStringLiteral("mediaReadyPollTimer"));
+    mediaReadyPollTimer->setInterval(120);
+    mediaReadyPollTimer->setSingleShot(false);
 
     // Dark background so blank/loading states aren't white flashes
     applyViewSettings(view);
@@ -1476,6 +2610,28 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
 
     if (isSettingsUrl(url) || url.path() == QLatin1String("/pages/newtab.html"))
         attachSettingsBridge(view);
+
+    if (auto *loadingCurtain = loadingCurtainForView(view))
+        loadingCurtain->setLoading(!isInternalGhostPage(url));
+
+    connect(mediaReadyPollTimer, &QTimer::timeout, this, [view]() {
+        auto *loadingCurtain = loadingCurtainForView(view);
+        auto *pollTimer = mediaReadyPollTimerForView(view);
+        if (!loadingCurtain || !pollTimer || !pollTimer->isActive())
+            return;
+
+        if (!loadingCurtain->isVisible()) {
+            pollTimer->stop();
+            return;
+        }
+
+        view->page()->runJavaScript(mediaReadyProbeScriptSource(), [loadingCurtain, pollTimer](const QVariant &result) {
+            if (result.toBool()) {
+                loadingCurtain->setLoading(false);
+                pollTimer->stop();
+            }
+        });
+    });
 
     view->setUrl(normalizedYouTubeUrl(url));
 
@@ -1490,6 +2646,14 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
             attachSettingsBridge(view);
 
         applyViewSettings(view);
+        if (auto *loadingCurtain = loadingCurtainForView(view))
+            loadingCurtain->setLoading(!isInternalGhostPage(url));
+        if (auto *pollTimer = mediaReadyPollTimerForView(view)) {
+            if (isInternalGhostPage(url))
+                pollTimer->stop();
+            else
+                pollTimer->start();
+        }
         refreshTabPresentation(view);
         updateUrlBar(url);
         if (m_pageStack->currentWidget() == view) {
@@ -1512,6 +2676,45 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
     connect(page, &QWebEnginePage::audioMutedChanged, this, [this, view](bool) {
         refreshTabPresentation(view);
     });
+    connect(page, &QWebEnginePage::fullScreenRequested,
+            this,
+            [this, view](QWebEngineFullScreenRequest request) {
+                const bool fullScreenEnabled = m_settings->value(QStringLiteral("content.fullScreenVideo")).toBool();
+                if (!fullScreenEnabled) {
+                    request.reject();
+                    return;
+                }
+
+                request.accept();
+                if (request.toggleOn())
+                    enterVideoFullScreen(view);
+                else
+                    exitVideoFullScreen();
+            });
+    connect(view, &QWebEngineView::loadStarted, this, [view]() {
+        if (auto *loadingCurtain = loadingCurtainForView(view))
+            loadingCurtain->setLoading(!isInternalGhostPage(view->url()));
+        if (auto *pollTimer = mediaReadyPollTimerForView(view)) {
+            if (isInternalGhostPage(view->url()))
+                pollTimer->stop();
+            else
+                pollTimer->start();
+        }
+    });
+    connect(view, &QWebEngineView::loadProgress, this, [view](int progress) {
+        if (progress >= 10) {
+            if (auto *loadingCurtain = loadingCurtainForView(view))
+                loadingCurtain->setLoading(false);
+        }
+    });
+    connect(view, &QWebEngineView::renderProcessTerminated,
+            this,
+            [view](QWebEnginePage::RenderProcessTerminationStatus, int) {
+                if (auto *pollTimer = mediaReadyPollTimerForView(view))
+                    pollTimer->stop();
+                if (auto *loadingCurtain = loadingCurtainForView(view))
+                    loadingCurtain->setLoading(false);
+            });
     connect(page, &QWebEnginePage::linkHovered, this, [this, view](const QString &link) {
         if (m_pageStack->currentWidget() != view)
             return;
@@ -1526,8 +2729,13 @@ QWebEngineView *MainWindow::createWebView(const QUrl &url)
         refreshStatusBar();
     });
     connect(view, &QWebEngineView::loadFinished, this, [this, view](bool ok) {
+        if (auto *pollTimer = mediaReadyPollTimerForView(view))
+            pollTimer->stop();
+        if (auto *loadingCurtain = loadingCurtainForView(view))
+            loadingCurtain->setLoading(false);
+
         if (ok && view) {
-            view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode));
+            view->page()->runJavaScript(overlayScrollbarScriptSource(m_darkMode, shouldInjectOverlayScrollbarScript(view->url())));
             view->page()->runJavaScript(accessibilityScriptSource(
                 m_settings->value(QStringLiteral("accessibility.highContrast")).toBool(),
                 m_darkMode));
@@ -1634,6 +2842,7 @@ void MainWindow::attachSettingsBridge(QWebEngineView *view)
 
     auto *channel = new QWebChannel(view->page());
     channel->registerObject(QStringLiteral("ghostSettings"), m_settings);
+    channel->registerObject(QStringLiteral("ghostBookmarks"), m_bookmarks);
     channel->registerObject(QStringLiteral("ghostHistory"), m_history);
     channel->registerObject(QStringLiteral("ghostCookies"), m_cookies);
     channel->registerObject(QStringLiteral("ghostProtection"), m_protectionDiagnostics);
@@ -1697,6 +2906,17 @@ QString MainWindow::windowPlacementPath() const
     return dir.filePath(QStringLiteral("window-state.json"));
 }
 
+QString MainWindow::devtoolsStatePath() const
+{
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (configDir.isEmpty())
+        configDir = QCoreApplication::applicationDirPath();
+
+    QDir dir(configDir);
+    dir.mkpath(QStringLiteral("."));
+    return dir.filePath(QStringLiteral("devtools-state.json"));
+}
+
 void MainWindow::saveSessionState() const
 {
     if (!m_settings || !m_pageStack || !m_tabBar)
@@ -1758,7 +2978,14 @@ bool MainWindow::restoreSessionState()
 
 void MainWindow::saveWindowPlacement() const
 {
-    QRect savedGeometry = isMaximized() ? normalGeometry() : geometry();
+    if (!m_windowPlacementReady)
+        return;
+
+    // Prefer our explicitly-captured pre-maximize geometry over normalGeometry(),
+    // which is unreliable on frameless windows (Qt::FramelessWindowHint).
+    QRect savedGeometry = isMaximized()
+                              ? (m_preMaximizeGeometry.isValid() ? m_preMaximizeGeometry : normalGeometry())
+                              : geometry();
     if (!savedGeometry.isValid())
         savedGeometry = geometry();
 
@@ -1797,7 +3024,7 @@ void MainWindow::restoreWindowPlacement()
         root.value(QStringLiteral("width")).toInt(width()),
         root.value(QStringLiteral("height")).toInt(height()));
 
-    if (!savedRect.isValid() || savedRect.width() < 640 || savedRect.height() < 480)
+    if (!savedRect.isValid() || savedRect.width() <= 640 || savedRect.height() <= 480)
         return;
 
     QRect boundedRect = savedRect;
@@ -1829,6 +3056,7 @@ void MainWindow::restoreWindowPlacement()
 
     m_restoringWindowPlacement = true;
     setGeometry(boundedRect);
+    m_preMaximizeGeometry = boundedRect;  // so Restore works correctly after startup
 
     if (root.value(QStringLiteral("maximized")).toBool()) {
         QTimer::singleShot(0, this, [this]() {
